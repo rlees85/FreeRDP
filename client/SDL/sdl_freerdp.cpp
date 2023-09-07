@@ -853,41 +853,16 @@ static int sdl_run(SdlContext* sdl)
 
 					Uint32 curFlags = SDL_GetWindowFlags(window);
 
-					if (enter)
-					{
-						if (!(curFlags & SDL_WINDOW_BORDERLESS))
-						{
-							auto idx = SDL_GetWindowDisplayIndex(window);
-							SDL_DisplayMode mode = {};
-							SDL_GetCurrentDisplayMode(idx, &mode);
+                                        const BOOL isSet = (curFlags & SDL_WINDOW_FULLSCREEN) ? TRUE : FALSE;
 
-							SDL_RestoreWindow(window); // Maximize so we can see the caption and
-							                           // bits
-							SDL_SetWindowBordered(window, SDL_FALSE);
-							SDL_SetWindowPosition(window, 0, 0);
-#if SDL_VERSION_ATLEAST(2, 0, 16)
-							SDL_SetWindowAlwaysOnTop(window, SDL_TRUE);
-#endif
-							SDL_RaiseWindow(window);
-							SDL_SetWindowSize(window, mode.w, mode.h);
-						}
-					}
+                                        if (enter)
+                                          curFlags |= SDL_WINDOW_FULLSCREEN;
+
 					else
-					{
-						if (curFlags & SDL_WINDOW_BORDERLESS)
-						{
+                                          curFlags &= ~SDL_WINDOW_FULLSCREEN;
 
-							SDL_SetWindowBordered(window, SDL_TRUE);
-#if SDL_VERSION_ATLEAST(2, 0, 16)
-							SDL_SetWindowAlwaysOnTop(window, SDL_FALSE);
-#endif
-							SDL_RaiseWindow(window);
-							SDL_MinimizeWindow(
-							    window); // Maximize so we can see the caption and bits
-							SDL_MaximizeWindow(
-							    window); // Maximize so we can see the caption and bits
-						}
-					}
+                                        if ((enter && !isSet) || (!enter && isSet))
+                                          SDL_SetWindowFullscreen(window, curFlags);
 				}
 				break;
 				case SDL_USEREVENT_POINTER_NULL:
