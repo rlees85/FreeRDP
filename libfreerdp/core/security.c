@@ -20,6 +20,7 @@
 
 #include <freerdp/config.h>
 
+#include "settings.h"
 #include "security.h"
 
 #include <freerdp/log.h>

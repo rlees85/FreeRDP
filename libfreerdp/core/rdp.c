@@ -20,6 +20,8 @@
 
 #include <freerdp/config.h>
 
+#include "settings.h"
+
 #include <winpr/crt.h>
 #include <winpr/string.h>
 #include <winpr/synch.h>
@@ -1340,34 +1342,40 @@ state_run_t rdp_recv_message_channel_pdu(rdpRdp* rdp, wStream* s, UINT16 securit
 	return STATE_RUN_SUCCESS;
 }
 
-state_run_t rdp_recv_out_of_sequence_pdu(rdpRdp* rdp, wStream* s)
+state_run_t rdp_recv_out_of_sequence_pdu(rdpRdp* rdp, wStream* s, UINT16 pduType, UINT16 length)
 {
-	UINT16 type;
-	UINT16 length;
-	UINT16 channelId;
-
+	state_run_t rc;
 	WINPR_ASSERT(rdp);
 
-	if (!rdp_read_share_control_header(rdp, s, &length, NULL, &type, &channelId))
-		return STATE_RUN_FAILED;
+	switch (pduType)
+	{
+		case PDU_TYPE_DATA:
+			rc = rdp_recv_data_pdu(rdp, s);
+			break;
+		case PDU_TYPE_SERVER_REDIRECTION:
+			rc = rdp_recv_enhanced_security_redirection_packet(rdp, s);
+			break;
+		case PDU_TYPE_FLOW_RESPONSE:
+		case PDU_TYPE_FLOW_STOP:
+		case PDU_TYPE_FLOW_TEST:
+			rc = STATE_RUN_SUCCESS;
+			break;
+		default:
+		{
+			char buffer1[256] = { 0 };
+			char buffer2[256] = { 0 };
 
-	if (type == PDU_TYPE_DATA)
-	{
-		return rdp_recv_data_pdu(rdp, s);
+			WLog_Print(rdp->log, WLOG_ERROR, "expected %s, got %s",
+			           pdu_type_to_str(PDU_TYPE_DEMAND_ACTIVE, buffer1, sizeof(buffer1)),
+			           pdu_type_to_str(pduType, buffer2, sizeof(buffer2)));
+			rc = STATE_RUN_FAILED;
+		}
+		break;
 	}
-	else if (type == PDU_TYPE_SERVER_REDIRECTION)
-	{
-		return rdp_recv_enhanced_security_redirection_packet(rdp, s);
-	}
-	else if (type == PDU_TYPE_FLOW_RESPONSE || type == PDU_TYPE_FLOW_STOP ||
-	         type == PDU_TYPE_FLOW_TEST)
-	{
-		return STATE_RUN_SUCCESS;
-	}
-	else
-	{
+
+	if (!tpkt_ensure_stream_consumed(s, length))
 		return STATE_RUN_FAILED;
-	}
+	return rc;
 }
 
 BOOL rdp_read_flow_control_pdu(rdpRdp* rdp, wStream* s, UINT16* type, UINT16* channel_id)
@@ -1434,7 +1442,7 @@ BOOL rdp_decrypt(rdpRdp* rdp, wStream* s, UINT16* pLength, UINT16 securityFlags)
 			goto unlock;
 
 		UINT16 len = 0;
-		Stream_Read_UINT16(s, len);    /* 0x10 */
+		Stream_Read_UINT16(s, len); /* 0x10 */
 		if (len != 0x10)
 			WLog_Print(rdp->log, WLOG_WARN, "ENCRYPTION_METHOD_FIPS length %" PRIu16 " != 0x10",
 			           len);
@@ -1844,6 +1852,9 @@ static state_run_t rdp_recv_callback_int(rdpTransport* transport, wStream* s, vo
 			{
 				nego_recv(rdp->transport, s, (void*)rdp->nego);
 
+				if (!nego_update_settings_from_state(rdp->nego, rdp->settings))
+					return FALSE;
+
 				if (nego_get_state(rdp->nego) != NEGO_STATE_FINAL)
 				{
 					WLog_Print(rdp->log, WLOG_ERROR, "%s - nego_recv() fail",
@@ -2035,7 +2046,7 @@ static state_run_t rdp_recv_callback_int(rdpTransport* transport, wStream* s, vo
 				           rdp_get_state_string(rdp),
 				           state_run_result_string(status, buffer, ARRAYSIZE(buffer)));
 			}
-			else if (status != STATE_RUN_REDIRECT)
+			else if (status == STATE_RUN_ACTIVE)
 			{
 				if (!rdp_client_transition_to_state(
 				        rdp, CONNECTION_STATE_CAPABILITIES_EXCHANGE_CONFIRM_ACTIVE))
@@ -2220,7 +2231,6 @@ rdpRdp* rdp_new(rdpContext* context)
 {
 	rdpRdp* rdp;
 	DWORD flags = 0;
-	DWORD remoteFlags = 0;
 	rdp = (rdpRdp*)calloc(1, sizeof(rdpRdp));
 
 	if (!rdp)
@@ -2229,7 +2239,7 @@ rdpRdp* rdp_new(rdpContext* context)
 	rdp->log = WLog_Get(RDP_TAG);
 	WINPR_ASSERT(rdp->log);
 
-	_snprintf(rdp->log_context, sizeof(rdp->log_context), "%p", context);
+	_snprintf(rdp->log_context, sizeof(rdp->log_context), "%p", (void*)context);
 	WLog_SetContext(rdp->log, NULL, rdp->log_context);
 
 	InitializeCriticalSection(&rdp->critical);
@@ -2238,8 +2248,6 @@ rdpRdp* rdp_new(rdpContext* context)
 
 	if (context->ServerMode)
 		flags |= FREERDP_SETTINGS_SERVER_MODE;
-	else
-		remoteFlags |= FREERDP_SETTINGS_SERVER_MODE;
 
 	if (!context->settings)
 	{
@@ -2679,7 +2687,7 @@ const char* rdp_security_flag_string(UINT32 securityFlags, char* buffer, size_t 
 
 static BOOL rdp_reset_remote_settings(rdpRdp* rdp)
 {
-	UINT32 flags = 0;
+	UINT32 flags = FREERDP_SETTINGS_REMOTE_MODE;
 	WINPR_ASSERT(rdp);
 	freerdp_settings_free(rdp->remoteSettings);
 

@@ -23,6 +23,8 @@
 
 #include <freerdp/config.h>
 
+#include "settings.h"
+
 #include "info.h"
 #include "input.h"
 #include "rdp.h"
@@ -393,6 +395,7 @@ BOOL rdp_client_connect(rdpRdp* rdp)
 	if (!status)
 		return FALSE;
 
+	nego_set_childsession_enabled(rdp->nego, settings->ConnectChildSession);
 	nego_set_send_preconnection_pdu(rdp->nego, settings->SendPreconnectionPdu);
 	nego_set_preconnection_id(rdp->nego, settings->PreconnectionId);
 	nego_set_preconnection_blob(rdp->nego, settings->PreconnectionBlob);
@@ -421,7 +424,6 @@ BOOL rdp_client_connect(rdpRdp* rdp)
 
 	if (!freerdp_settings_get_bool(settings, FreeRDP_TransportDumpReplay))
 	{
-
 		if (!rdp_client_transition_to_state(rdp, CONNECTION_STATE_NEGO))
 			return FALSE;
 
@@ -1245,36 +1247,33 @@ state_run_t rdp_client_connect_license(rdpRdp* rdp, wStream* s)
 
 state_run_t rdp_client_connect_demand_active(rdpRdp* rdp, wStream* s)
 {
-	size_t pos;
-	UINT16 length;
+	UINT16 length = 0;
+	UINT16 channelId = 0;
+	UINT16 pduType = 0;
+	UINT16 pduSource = 0;
 
 	WINPR_ASSERT(rdp);
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(rdp->settings);
 
-	pos = Stream_GetPosition(s);
+	if (!rdp_recv_get_active_header(rdp, s, &channelId, &length))
+		return STATE_RUN_FAILED;
 
-	if (!rdp_recv_demand_active(rdp, s))
+	if (freerdp_shall_disconnect_context(rdp->context))
+		return STATE_RUN_QUIT_SESSION;
+
+	if (!rdp_read_share_control_header(rdp, s, NULL, NULL, &pduType, &pduSource))
+		return STATE_RUN_FAILED;
+
+	switch (pduType)
 	{
-		state_run_t rc;
-		UINT16 channelId;
-
-		Stream_SetPosition(s, pos);
-		if (!rdp_recv_get_active_header(rdp, s, &channelId, &length))
-			return STATE_RUN_FAILED;
-		/* Was Stream_Seek(s, RDP_PACKET_HEADER_MAX_LENGTH);
-		 * but the headers aren't always that length,
-		 * so that could result in a bad offset.
-		 */
-		rc = rdp_recv_out_of_sequence_pdu(rdp, s);
-		if (state_run_failed(rc))
-			return rc;
-		if (!tpkt_ensure_stream_consumed(s, length))
-			return STATE_RUN_FAILED;
-		return rc;
+		case PDU_TYPE_DEMAND_ACTIVE:
+			if (!rdp_recv_demand_active(rdp, s, pduSource, length))
+				return STATE_RUN_FAILED;
+			return STATE_RUN_ACTIVE;
+		default:
+			return rdp_recv_out_of_sequence_pdu(rdp, s, pduType, length);
 	}
-
-	return STATE_RUN_SUCCESS;
 }
 
 state_run_t rdp_client_connect_finalize(rdpRdp* rdp)

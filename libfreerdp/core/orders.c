@@ -21,7 +21,7 @@
 
 #include <freerdp/config.h>
 
-#include "window.h"
+#include "settings.h"
 
 #include <winpr/wtypes.h>
 #include <winpr/crt.h>
@@ -34,6 +34,7 @@
 #include <freerdp/gdi/gdi.h>
 
 #include "orders.h"
+#include "window.h"
 
 #include "../cache/glyph.h"
 #include "../cache/bitmap.h"
@@ -1037,7 +1038,7 @@ static INLINE BOOL update_read_delta_points(wStream* s, DELTA_POINT** points, UI
 
 	Stream_GetPointer(s, zeroBits);
 	Stream_Seek(s, zeroBitsSize);
-	ZeroMemory(points, sizeof(DELTA_POINT) * number);
+	ZeroMemory(*points, sizeof(DELTA_POINT) * number);
 
 	for (UINT32 i = 0; i < number; i++)
 	{

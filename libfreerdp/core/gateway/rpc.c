@@ -21,6 +21,8 @@
 
 #include <freerdp/config.h>
 
+#include "../settings.h"
+
 #include <winpr/crt.h>
 #include <winpr/assert.h>
 #include <winpr/tchar.h>
@@ -59,6 +61,125 @@ static const char* PTYPE_STRINGS[] = { "PTYPE_REQUEST",       "PTYPE_PING",
 	                                   "PTYPE_CO_CANCEL",     "PTYPE_ORPHANED",
 	                                   "PTYPE_RTS",           "" };
 
+static const char* client_in_state_str(CLIENT_IN_CHANNEL_STATE state)
+{
+	const char* str = "CLIENT_IN_CHANNEL_STATE_UNKNOWN";
+
+	switch (state)
+	{
+		case CLIENT_IN_CHANNEL_STATE_INITIAL:
+			str = "CLIENT_IN_CHANNEL_STATE_INITIAL";
+			break;
+
+		case CLIENT_IN_CHANNEL_STATE_CONNECTED:
+			str = "CLIENT_IN_CHANNEL_STATE_CONNECTED";
+			break;
+
+		case CLIENT_IN_CHANNEL_STATE_SECURITY:
+			str = "CLIENT_IN_CHANNEL_STATE_SECURITY";
+			break;
+
+		case CLIENT_IN_CHANNEL_STATE_NEGOTIATED:
+			str = "CLIENT_IN_CHANNEL_STATE_NEGOTIATED";
+			break;
+
+		case CLIENT_IN_CHANNEL_STATE_OPENED:
+			str = "CLIENT_IN_CHANNEL_STATE_OPENED";
+			break;
+
+		case CLIENT_IN_CHANNEL_STATE_OPENED_A4W:
+			str = "CLIENT_IN_CHANNEL_STATE_OPENED_A4W";
+			break;
+
+		case CLIENT_IN_CHANNEL_STATE_FINAL:
+			str = "CLIENT_IN_CHANNEL_STATE_FINAL";
+			break;
+	}
+	return str;
+}
+
+static const char* client_out_state_str(CLIENT_OUT_CHANNEL_STATE state)
+{
+	const char* str = "CLIENT_OUT_CHANNEL_STATE_UNKNOWN";
+
+	switch (state)
+	{
+		case CLIENT_OUT_CHANNEL_STATE_INITIAL:
+			str = "CLIENT_OUT_CHANNEL_STATE_INITIAL";
+			break;
+
+		case CLIENT_OUT_CHANNEL_STATE_CONNECTED:
+			str = "CLIENT_OUT_CHANNEL_STATE_CONNECTED";
+			break;
+
+		case CLIENT_OUT_CHANNEL_STATE_SECURITY:
+			str = "CLIENT_OUT_CHANNEL_STATE_SECURITY";
+			break;
+
+		case CLIENT_OUT_CHANNEL_STATE_NEGOTIATED:
+			str = "CLIENT_OUT_CHANNEL_STATE_NEGOTIATED";
+			break;
+
+		case CLIENT_OUT_CHANNEL_STATE_OPENED:
+			str = "CLIENT_OUT_CHANNEL_STATE_OPENED";
+			break;
+
+		case CLIENT_OUT_CHANNEL_STATE_OPENED_A6W:
+			str = "CLIENT_OUT_CHANNEL_STATE_OPENED_A6W";
+			break;
+
+		case CLIENT_OUT_CHANNEL_STATE_OPENED_A10W:
+			str = "CLIENT_OUT_CHANNEL_STATE_OPENED_A10W";
+			break;
+
+		case CLIENT_OUT_CHANNEL_STATE_OPENED_B3W:
+			str = "CLIENT_OUT_CHANNEL_STATE_OPENED_B3W";
+			break;
+
+		case CLIENT_OUT_CHANNEL_STATE_RECYCLED:
+			str = "CLIENT_OUT_CHANNEL_STATE_RECYCLED";
+			break;
+
+		case CLIENT_OUT_CHANNEL_STATE_FINAL:
+			str = "CLIENT_OUT_CHANNEL_STATE_FINAL";
+			break;
+	}
+	return str;
+}
+
+const char* rpc_vc_state_str(VIRTUAL_CONNECTION_STATE state)
+{
+	const char* str = "VIRTUAL_CONNECTION_STATE_UNKNOWN";
+
+	switch (state)
+	{
+		case VIRTUAL_CONNECTION_STATE_INITIAL:
+			str = "VIRTUAL_CONNECTION_STATE_INITIAL";
+			break;
+
+		case VIRTUAL_CONNECTION_STATE_OUT_CHANNEL_WAIT:
+			str = "VIRTUAL_CONNECTION_STATE_OUT_CHANNEL_WAIT";
+			break;
+
+		case VIRTUAL_CONNECTION_STATE_WAIT_A3W:
+			str = "VIRTUAL_CONNECTION_STATE_WAIT_A3W";
+			break;
+
+		case VIRTUAL_CONNECTION_STATE_WAIT_C2:
+			str = "VIRTUAL_CONNECTION_STATE_WAIT_C2";
+			break;
+
+		case VIRTUAL_CONNECTION_STATE_OPENED:
+			str = "VIRTUAL_CONNECTION_STATE_OPENED";
+			break;
+
+		case VIRTUAL_CONNECTION_STATE_FINAL:
+			str = "VIRTUAL_CONNECTION_STATE_FINAL";
+			break;
+	}
+	return str;
+}
+
 /*
  * [MS-RPCH]: Remote Procedure Call over HTTP Protocol Specification:
  * http://msdn.microsoft.com/en-us/library/cc243950/
@@ -86,56 +207,57 @@ static const char* PTYPE_STRINGS[] = { "PTYPE_REQUEST",       "PTYPE_PING",
  *
  */
 
-void rpc_pdu_header_print(const rpcconn_hdr_t* header)
+void rpc_pdu_header_print(wLog* log, const rpcconn_hdr_t* header)
 {
 	WINPR_ASSERT(header);
 
-	WLog_INFO(TAG, "rpc_vers: %" PRIu8 "", header->common.rpc_vers);
-	WLog_INFO(TAG, "rpc_vers_minor: %" PRIu8 "", header->common.rpc_vers_minor);
+	WLog_Print(log, WLOG_INFO, "rpc_vers: %" PRIu8 "", header->common.rpc_vers);
+	WLog_Print(log, WLOG_INFO, "rpc_vers_minor: %" PRIu8 "", header->common.rpc_vers_minor);
 
 	if (header->common.ptype > PTYPE_RTS)
-		WLog_INFO(TAG, "ptype: %s (%" PRIu8 ")", "PTYPE_UNKNOWN", header->common.ptype);
+		WLog_Print(log, WLOG_INFO, "ptype: %s (%" PRIu8 ")", "PTYPE_UNKNOWN", header->common.ptype);
 	else
-		WLog_INFO(TAG, "ptype: %s (%" PRIu8 ")", PTYPE_STRINGS[header->common.ptype],
-		          header->common.ptype);
+		WLog_Print(log, WLOG_INFO, "ptype: %s (%" PRIu8 ")", PTYPE_STRINGS[header->common.ptype],
+		           header->common.ptype);
 
-	WLog_INFO(TAG, "pfc_flags (0x%02" PRIX8 ") = {", header->common.pfc_flags);
+	WLog_Print(log, WLOG_INFO, "pfc_flags (0x%02" PRIX8 ") = {", header->common.pfc_flags);
 
 	if (header->common.pfc_flags & PFC_FIRST_FRAG)
-		WLog_INFO(TAG, " PFC_FIRST_FRAG");
+		WLog_Print(log, WLOG_INFO, " PFC_FIRST_FRAG");
 
 	if (header->common.pfc_flags & PFC_LAST_FRAG)
-		WLog_INFO(TAG, " PFC_LAST_FRAG");
+		WLog_Print(log, WLOG_INFO, " PFC_LAST_FRAG");
 
 	if (header->common.pfc_flags & PFC_PENDING_CANCEL)
-		WLog_INFO(TAG, " PFC_PENDING_CANCEL");
+		WLog_Print(log, WLOG_INFO, " PFC_PENDING_CANCEL");
 
 	if (header->common.pfc_flags & PFC_RESERVED_1)
-		WLog_INFO(TAG, " PFC_RESERVED_1");
+		WLog_Print(log, WLOG_INFO, " PFC_RESERVED_1");
 
 	if (header->common.pfc_flags & PFC_CONC_MPX)
-		WLog_INFO(TAG, " PFC_CONC_MPX");
+		WLog_Print(log, WLOG_INFO, " PFC_CONC_MPX");
 
 	if (header->common.pfc_flags & PFC_DID_NOT_EXECUTE)
-		WLog_INFO(TAG, " PFC_DID_NOT_EXECUTE");
+		WLog_Print(log, WLOG_INFO, " PFC_DID_NOT_EXECUTE");
 
 	if (header->common.pfc_flags & PFC_OBJECT_UUID)
-		WLog_INFO(TAG, " PFC_OBJECT_UUID");
+		WLog_Print(log, WLOG_INFO, " PFC_OBJECT_UUID");
 
-	WLog_INFO(TAG, " }");
-	WLog_INFO(TAG, "packed_drep[4]: %02" PRIX8 " %02" PRIX8 " %02" PRIX8 " %02" PRIX8 "",
-	          header->common.packed_drep[0], header->common.packed_drep[1],
-	          header->common.packed_drep[2], header->common.packed_drep[3]);
-	WLog_INFO(TAG, "frag_length: %" PRIu16 "", header->common.frag_length);
-	WLog_INFO(TAG, "auth_length: %" PRIu16 "", header->common.auth_length);
-	WLog_INFO(TAG, "call_id: %" PRIu32 "", header->common.call_id);
+	WLog_Print(log, WLOG_INFO, " }");
+	WLog_Print(log, WLOG_INFO,
+	           "packed_drep[4]: %02" PRIX8 " %02" PRIX8 " %02" PRIX8 " %02" PRIX8 "",
+	           header->common.packed_drep[0], header->common.packed_drep[1],
+	           header->common.packed_drep[2], header->common.packed_drep[3]);
+	WLog_Print(log, WLOG_INFO, "frag_length: %" PRIu16 "", header->common.frag_length);
+	WLog_Print(log, WLOG_INFO, "auth_length: %" PRIu16 "", header->common.auth_length);
+	WLog_Print(log, WLOG_INFO, "call_id: %" PRIu32 "", header->common.call_id);
 
 	if (header->common.ptype == PTYPE_RESPONSE)
 	{
-		WLog_INFO(TAG, "alloc_hint: %" PRIu32 "", header->response.alloc_hint);
-		WLog_INFO(TAG, "p_cont_id: %" PRIu16 "", header->response.p_cont_id);
-		WLog_INFO(TAG, "cancel_count: %" PRIu8 "", header->response.cancel_count);
-		WLog_INFO(TAG, "reserved: %" PRIu8 "", header->response.reserved);
+		WLog_Print(log, WLOG_INFO, "alloc_hint: %" PRIu32 "", header->response.alloc_hint);
+		WLog_Print(log, WLOG_INFO, "p_cont_id: %" PRIu16 "", header->response.p_cont_id);
+		WLog_Print(log, WLOG_INFO, "cancel_count: %" PRIu8 "", header->response.cancel_count);
+		WLog_Print(log, WLOG_INFO, "reserved: %" PRIu8 "", header->response.reserved);
 	}
 }
 
@@ -243,7 +365,8 @@ size_t rpc_offset_pad(size_t* offset, size_t pad)
  *
  */
 
-BOOL rpc_get_stub_data_info(const rpcconn_hdr_t* header, size_t* poffset, size_t* length)
+BOOL rpc_get_stub_data_info(rdpRpc* rpc, const rpcconn_hdr_t* header, size_t* poffset,
+                            size_t* length)
 {
 	size_t used = 0;
 	size_t offset = 0;
@@ -254,6 +377,7 @@ BOOL rpc_get_stub_data_info(const rpcconn_hdr_t* header, size_t* poffset, size_t
 	UINT32 sec_trailer_offset;
 	const rpc_sec_trailer* sec_trailer = NULL;
 
+	WINPR_ASSERT(rpc);
 	WINPR_ASSERT(header);
 	WINPR_ASSERT(poffset);
 	WINPR_ASSERT(length);
@@ -279,7 +403,7 @@ BOOL rpc_get_stub_data_info(const rpcconn_hdr_t* header, size_t* poffset, size_t
 			break;
 
 		default:
-			WLog_ERR(TAG, "Unknown PTYPE: 0x%02" PRIX8 "", header->common.ptype);
+			WLog_Print(rpc->log, WLOG_ERROR, "Unknown PTYPE: 0x%02" PRIX8 "", header->common.ptype);
 			goto fail;
 	}
 
@@ -313,8 +437,9 @@ BOOL rpc_get_stub_data_info(const rpcconn_hdr_t* header, size_t* poffset, size_t
 
 	if ((frag_length - (sec_trailer_offset + 8)) != auth_length)
 	{
-		WLog_ERR(TAG, "invalid auth_length: actual: %" PRIu32 ", expected: %" PRIu32 "",
-		         auth_length, (frag_length - (sec_trailer_offset + 8)));
+		WLog_Print(rpc->log, WLOG_ERROR,
+		           "invalid auth_length: actual: %" PRIu32 ", expected: %" PRIu32 "", auth_length,
+		           (frag_length - (sec_trailer_offset + 8)));
 	}
 
 	*length = sec_trailer_offset - auth_pad_length - offset;
@@ -343,7 +468,7 @@ SSIZE_T rpc_channel_read(RpcChannel* channel, wStream* s, size_t length)
 	if (BIO_should_retry(channel->tls->bio))
 		return 0;
 
-	WLog_ERR(TAG, "rpc_channel_read: Out of retries");
+	WLog_Print(channel->rpc->log, WLOG_ERROR, "rpc_channel_read: Out of retries");
 	return -1;
 }
 
@@ -360,51 +485,20 @@ SSIZE_T rpc_channel_write(RpcChannel* channel, const BYTE* data, size_t length)
 
 BOOL rpc_in_channel_transition_to_state(RpcInChannel* inChannel, CLIENT_IN_CHANNEL_STATE state)
 {
-	const char* str = "CLIENT_IN_CHANNEL_STATE_UNKNOWN";
-
-	switch (state)
-	{
-		case CLIENT_IN_CHANNEL_STATE_INITIAL:
-			str = "CLIENT_IN_CHANNEL_STATE_INITIAL";
-			break;
-
-		case CLIENT_IN_CHANNEL_STATE_CONNECTED:
-			str = "CLIENT_IN_CHANNEL_STATE_CONNECTED";
-			break;
-
-		case CLIENT_IN_CHANNEL_STATE_SECURITY:
-			str = "CLIENT_IN_CHANNEL_STATE_SECURITY";
-			break;
-
-		case CLIENT_IN_CHANNEL_STATE_NEGOTIATED:
-			str = "CLIENT_IN_CHANNEL_STATE_NEGOTIATED";
-			break;
-
-		case CLIENT_IN_CHANNEL_STATE_OPENED:
-			str = "CLIENT_IN_CHANNEL_STATE_OPENED";
-			break;
-
-		case CLIENT_IN_CHANNEL_STATE_OPENED_A4W:
-			str = "CLIENT_IN_CHANNEL_STATE_OPENED_A4W";
-			break;
-
-		case CLIENT_IN_CHANNEL_STATE_FINAL:
-			str = "CLIENT_IN_CHANNEL_STATE_FINAL";
-			break;
-	}
-
 	if (!inChannel)
 		return FALSE;
 
 	inChannel->State = state;
-	WLog_DBG(TAG, "%s", str);
+	WLog_Print(inChannel->common.rpc->log, WLOG_DEBUG, "%s", client_in_state_str(state));
 	return TRUE;
 }
 
-static int rpc_channel_rpch_init(RpcClient* client, RpcChannel* channel, const char* inout)
+static int rpc_channel_rpch_init(RpcClient* client, RpcChannel* channel, const char* inout,
+                                 const GUID* guid)
 {
 	HttpContext* http;
 	rdpSettings* settings;
+	UINT32 timeout = 0;
 
 	if (!client || !channel || !inout || !client->context || !client->context->settings)
 		return -1;
@@ -424,42 +518,72 @@ static int rpc_channel_rpch_init(RpcClient* client, RpcChannel* channel, const c
 
 	http = channel->http;
 
+	{
+		if (!http_context_set_pragma(http, "ResourceTypeUuid=44e265dd-7daf-42cd-8560-3cdb6e7a2729"))
+			return -1;
+
+		if (guid)
+		{
+			char* strguid = NULL;
+			RPC_STATUS rpcStatus = UuidToStringA(guid, &strguid);
+
+			if (rpcStatus != RPC_S_OK)
+				return -1;
+
+			const BOOL rc = http_context_append_pragma(http, "SessionId=%s", strguid);
+			RpcStringFreeA(&strguid);
+			if (!rc)
+				return -1;
+		}
+		if (timeout)
+		{
+			if (!http_context_append_pragma(http, "MinConnTimeout=%" PRIu32, timeout))
+				return -1;
+		}
+
+		if (!http_context_set_rdg_correlation_id(http, guid) ||
+		    !http_context_set_rdg_connection_id(http, guid))
+			return -1;
+	}
+
+	/* TODO: "/rpcwithcert/rpcproxy.dll". */
 	if (!http_context_set_method(http, inout) ||
 	    !http_context_set_uri(http, "/rpc/rpcproxy.dll?localhost:3388") ||
 	    !http_context_set_accept(http, "application/rpc") ||
 	    !http_context_set_cache_control(http, "no-cache") ||
 	    !http_context_set_connection(http, "Keep-Alive") ||
 	    !http_context_set_user_agent(http, "MSRPC") ||
-	    !http_context_set_host(http, settings->GatewayHostname) ||
-	    !http_context_set_pragma(http, "ResourceTypeUuid=44e265dd-7daf-42cd-8560-3cdb6e7a2729, "
-	                                   "SessionId=fbd9c34f-397d-471d-a109-1b08cc554624"))
+	    !http_context_set_host(http, settings->GatewayHostname))
 		return -1;
 
 	return 1;
 }
 
-static int rpc_in_channel_init(rdpRpc* rpc, RpcInChannel* inChannel)
+static int rpc_in_channel_init(rdpRpc* rpc, RpcInChannel* inChannel, const GUID* guid)
 {
+	WINPR_ASSERT(rpc);
+	WINPR_ASSERT(inChannel);
+
+	inChannel->common.rpc = rpc;
 	inChannel->State = CLIENT_IN_CHANNEL_STATE_INITIAL;
 	inChannel->BytesSent = 0;
 	inChannel->SenderAvailableWindow = rpc->ReceiveWindow;
 	inChannel->PingOriginator.ConnectionTimeout = 30;
 	inChannel->PingOriginator.KeepAliveInterval = 0;
 
-	if (rpc_channel_rpch_init(rpc->client, &inChannel->common, "RPC_IN_DATA") < 0)
+	if (rpc_channel_rpch_init(rpc->client, &inChannel->common, "RPC_IN_DATA", guid) < 0)
 		return -1;
 
 	return 1;
 }
 
-static RpcInChannel* rpc_in_channel_new(rdpRpc* rpc)
+static RpcInChannel* rpc_in_channel_new(rdpRpc* rpc, const GUID* guid)
 {
-	RpcInChannel* inChannel = NULL;
-	inChannel = (RpcInChannel*)calloc(1, sizeof(RpcInChannel));
+	RpcInChannel* inChannel = (RpcInChannel*)calloc(1, sizeof(RpcInChannel));
 
 	if (inChannel)
 	{
-		rpc_in_channel_init(rpc, inChannel);
+		rpc_in_channel_init(rpc, inChannel, guid);
 	}
 
 	return inChannel;
@@ -478,61 +602,20 @@ void rpc_channel_free(RpcChannel* channel)
 
 BOOL rpc_out_channel_transition_to_state(RpcOutChannel* outChannel, CLIENT_OUT_CHANNEL_STATE state)
 {
-	const char* str = "CLIENT_OUT_CHANNEL_STATE_UNKNOWN";
-
-	switch (state)
-	{
-		case CLIENT_OUT_CHANNEL_STATE_INITIAL:
-			str = "CLIENT_OUT_CHANNEL_STATE_INITIAL";
-			break;
-
-		case CLIENT_OUT_CHANNEL_STATE_CONNECTED:
-			str = "CLIENT_OUT_CHANNEL_STATE_CONNECTED";
-			break;
-
-		case CLIENT_OUT_CHANNEL_STATE_SECURITY:
-			str = "CLIENT_OUT_CHANNEL_STATE_SECURITY";
-			break;
-
-		case CLIENT_OUT_CHANNEL_STATE_NEGOTIATED:
-			str = "CLIENT_OUT_CHANNEL_STATE_NEGOTIATED";
-			break;
-
-		case CLIENT_OUT_CHANNEL_STATE_OPENED:
-			str = "CLIENT_OUT_CHANNEL_STATE_OPENED";
-			break;
-
-		case CLIENT_OUT_CHANNEL_STATE_OPENED_A6W:
-			str = "CLIENT_OUT_CHANNEL_STATE_OPENED_A6W";
-			break;
-
-		case CLIENT_OUT_CHANNEL_STATE_OPENED_A10W:
-			str = "CLIENT_OUT_CHANNEL_STATE_OPENED_A10W";
-			break;
-
-		case CLIENT_OUT_CHANNEL_STATE_OPENED_B3W:
-			str = "CLIENT_OUT_CHANNEL_STATE_OPENED_B3W";
-			break;
-
-		case CLIENT_OUT_CHANNEL_STATE_RECYCLED:
-			str = "CLIENT_OUT_CHANNEL_STATE_RECYCLED";
-			break;
-
-		case CLIENT_OUT_CHANNEL_STATE_FINAL:
-			str = "CLIENT_OUT_CHANNEL_STATE_FINAL";
-			break;
-	}
-
 	if (!outChannel)
 		return FALSE;
 
 	outChannel->State = state;
-	WLog_DBG(TAG, "%s", str);
+	WLog_Print(outChannel->common.rpc->log, WLOG_DEBUG, "%s", client_out_state_str(state));
 	return TRUE;
 }
 
-static int rpc_out_channel_init(rdpRpc* rpc, RpcOutChannel* outChannel)
+static int rpc_out_channel_init(rdpRpc* rpc, RpcOutChannel* outChannel, const GUID* guid)
 {
+	WINPR_ASSERT(rpc);
+	WINPR_ASSERT(outChannel);
+
+	outChannel->common.rpc = rpc;
 	outChannel->State = CLIENT_OUT_CHANNEL_STATE_INITIAL;
 	outChannel->BytesReceived = 0;
 	outChannel->ReceiverAvailableWindow = rpc->ReceiveWindow;
@@ -540,20 +623,19 @@ static int rpc_out_channel_init(rdpRpc* rpc, RpcOutChannel* outChannel)
 	outChannel->ReceiveWindowSize = rpc->ReceiveWindow;
 	outChannel->AvailableWindowAdvertised = rpc->ReceiveWindow;
 
-	if (rpc_channel_rpch_init(rpc->client, &outChannel->common, "RPC_OUT_DATA") < 0)
+	if (rpc_channel_rpch_init(rpc->client, &outChannel->common, "RPC_OUT_DATA", guid) < 0)
 		return -1;
 
 	return 1;
 }
 
-RpcOutChannel* rpc_out_channel_new(rdpRpc* rpc)
+RpcOutChannel* rpc_out_channel_new(rdpRpc* rpc, const GUID* guid)
 {
-	RpcOutChannel* outChannel = NULL;
-	outChannel = (RpcOutChannel*)calloc(1, sizeof(RpcOutChannel));
+	RpcOutChannel* outChannel = (RpcOutChannel*)calloc(1, sizeof(RpcOutChannel));
 
 	if (outChannel)
 	{
-		rpc_out_channel_init(rpc, outChannel);
+		rpc_out_channel_init(rpc, outChannel, guid);
 	}
 
 	return outChannel;
@@ -562,70 +644,13 @@ RpcOutChannel* rpc_out_channel_new(rdpRpc* rpc)
 BOOL rpc_virtual_connection_transition_to_state(rdpRpc* rpc, RpcVirtualConnection* connection,
                                                 VIRTUAL_CONNECTION_STATE state)
 {
-	const char* str = "VIRTUAL_CONNECTION_STATE_UNKNOWN";
-
-	switch (state)
-	{
-		case VIRTUAL_CONNECTION_STATE_INITIAL:
-			str = "VIRTUAL_CONNECTION_STATE_INITIAL";
-			break;
-
-		case VIRTUAL_CONNECTION_STATE_OUT_CHANNEL_WAIT:
-			str = "VIRTUAL_CONNECTION_STATE_OUT_CHANNEL_WAIT";
-			break;
-
-		case VIRTUAL_CONNECTION_STATE_WAIT_A3W:
-			str = "VIRTUAL_CONNECTION_STATE_WAIT_A3W";
-			break;
-
-		case VIRTUAL_CONNECTION_STATE_WAIT_C2:
-			str = "VIRTUAL_CONNECTION_STATE_WAIT_C2";
-			break;
-
-		case VIRTUAL_CONNECTION_STATE_OPENED:
-			str = "VIRTUAL_CONNECTION_STATE_OPENED";
-			break;
-
-		case VIRTUAL_CONNECTION_STATE_FINAL:
-			str = "VIRTUAL_CONNECTION_STATE_FINAL";
-			break;
-	}
-
 	if (!connection)
 		return FALSE;
 
+	WINPR_ASSERT(rpc);
 	connection->State = state;
-	WLog_DBG(TAG, "%s", str);
+	WLog_Print(rpc->log, WLOG_DEBUG, "%s", rpc_vc_state_str(state));
 	return TRUE;
-}
-
-static RpcVirtualConnection* rpc_virtual_connection_new(rdpRpc* rpc)
-{
-	RpcVirtualConnection* connection;
-	connection = (RpcVirtualConnection*)calloc(1, sizeof(RpcVirtualConnection));
-
-	if (!connection)
-		return NULL;
-
-	rts_generate_cookie((BYTE*)&(connection->Cookie));
-	rts_generate_cookie((BYTE*)&(connection->AssociationGroupId));
-	connection->State = VIRTUAL_CONNECTION_STATE_INITIAL;
-	connection->DefaultInChannel = rpc_in_channel_new(rpc);
-
-	if (!connection->DefaultInChannel)
-		goto out_free;
-
-	connection->DefaultOutChannel = rpc_out_channel_new(rpc);
-
-	if (!connection->DefaultOutChannel)
-		goto out_default_in;
-
-	return connection;
-out_default_in:
-	free(connection->DefaultInChannel);
-out_free:
-	free(connection);
-	return NULL;
 }
 
 static void rpc_virtual_connection_free(RpcVirtualConnection* connection)
@@ -633,11 +658,45 @@ static void rpc_virtual_connection_free(RpcVirtualConnection* connection)
 	if (!connection)
 		return;
 
-	rpc_channel_free(&connection->DefaultInChannel->common);
-	rpc_channel_free(&connection->NonDefaultInChannel->common);
-	rpc_channel_free(&connection->DefaultOutChannel->common);
-	rpc_channel_free(&connection->NonDefaultOutChannel->common);
+	if (connection->DefaultInChannel)
+		rpc_channel_free(&connection->DefaultInChannel->common);
+	if (connection->NonDefaultInChannel)
+		rpc_channel_free(&connection->NonDefaultInChannel->common);
+	if (connection->DefaultOutChannel)
+		rpc_channel_free(&connection->DefaultOutChannel->common);
+	if (connection->NonDefaultOutChannel)
+		rpc_channel_free(&connection->NonDefaultOutChannel->common);
 	free(connection);
+}
+
+static RpcVirtualConnection* rpc_virtual_connection_new(rdpRpc* rpc)
+{
+	WINPR_ASSERT(rpc);
+
+	RpcVirtualConnection* connection =
+	    (RpcVirtualConnection*)calloc(1, sizeof(RpcVirtualConnection));
+
+	if (!connection)
+		return NULL;
+
+	rts_generate_cookie((BYTE*)&(connection->Cookie));
+	rts_generate_cookie((BYTE*)&(connection->AssociationGroupId));
+	connection->State = VIRTUAL_CONNECTION_STATE_INITIAL;
+
+	connection->DefaultInChannel = rpc_in_channel_new(rpc, &connection->Cookie);
+
+	if (!connection->DefaultInChannel)
+		goto fail;
+
+	connection->DefaultOutChannel = rpc_out_channel_new(rpc, &connection->Cookie);
+
+	if (!connection->DefaultOutChannel)
+		goto fail;
+
+	return connection;
+fail:
+	rpc_virtual_connection_free(connection);
+	return NULL;
 }
 
 static BOOL rpc_channel_tls_connect(RpcChannel* channel, UINT32 timeout)
@@ -753,7 +812,8 @@ static int rpc_in_channel_connect(RpcInChannel* inChannel, UINT32 timeout)
 
 	if (!rpc_ncacn_http_send_in_channel_request(&inChannel->common))
 	{
-		WLog_ERR(TAG, "rpc_ncacn_http_send_in_channel_request failure");
+		WLog_Print(inChannel->common.rpc->log, WLOG_ERROR,
+		           "rpc_ncacn_http_send_in_channel_request failure");
 		return -1;
 	}
 
@@ -786,7 +846,8 @@ static int rpc_out_channel_connect(RpcOutChannel* outChannel, int timeout)
 
 	if (!rpc_ncacn_http_send_out_channel_request(&outChannel->common, FALSE))
 	{
-		WLog_ERR(TAG, "rpc_ncacn_http_send_out_channel_request failure");
+		WLog_Print(outChannel->common.rpc->log, WLOG_ERROR,
+		           "rpc_ncacn_http_send_out_channel_request failure");
 		return FALSE;
 	}
 
@@ -817,7 +878,8 @@ int rpc_out_channel_replacement_connect(RpcOutChannel* outChannel, int timeout)
 
 	if (!rpc_ncacn_http_send_out_channel_request(&outChannel->common, TRUE))
 	{
-		WLog_ERR(TAG, "rpc_ncacn_http_send_out_channel_request failure");
+		WLog_Print(outChannel->common.rpc->log, WLOG_ERROR,
+		           "rpc_ncacn_http_send_out_channel_request failure");
 		return FALSE;
 	}
 
@@ -861,6 +923,7 @@ rdpRpc* rpc_new(rdpTransport* transport)
 	if (!rpc)
 		return NULL;
 
+	rpc->log = WLog_Get(TAG);
 	rpc->State = RPC_CLIENT_STATE_INITIAL;
 	rpc->transport = transport;
 	rpc->SendSeqNum = 0;

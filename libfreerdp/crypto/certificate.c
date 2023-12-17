@@ -40,6 +40,7 @@
 #include <openssl/err.h>
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
+#include <openssl/bn.h>
 
 #if defined(OPENSSL_VERSION_MAJOR) && (OPENSSL_VERSION_MAJOR >= 3)
 #include <openssl/core_names.h>
@@ -919,8 +920,9 @@ SSIZE_T freerdp_certificate_write_server_cert(const rdpCertificate* certificate,
 
 /**
  * Read an X.509 Certificate Chain.
- * @param certificate certificate module
+ * @param cert certificate module
  * @param s stream
+ * @return \b TRUE for success, \b FALSE otherwise.
  */
 
 static BOOL certificate_read_server_x509_certificate_chain(rdpCertificate* cert, wStream* s)
@@ -1152,7 +1154,7 @@ void certificate_free_int(rdpCertificate* cert)
 
 /**
  * Free certificate module.
- * @param certificate certificate module to be freed
+ * @param cert certificate module to be freed
  */
 
 void freerdp_certificate_free(rdpCertificate* cert)

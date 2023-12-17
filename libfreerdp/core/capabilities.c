@@ -17,8 +17,10 @@
  * limitations under the License.
  */
 
+#include <winpr/wtsapi.h>
 #include <freerdp/config.h>
 
+#include "settings.h"
 #include "capabilities.h"
 #include "fastpath.h"
 
@@ -28,8 +30,6 @@
 #include <freerdp/log.h>
 
 #define TAG FREERDP_TAG("core.capabilities")
-
-#define CHANNEL_CHUNK_LENGTH 1600
 
 static const char* const CAPSET_TYPE_STRINGS[] = { "Unknown",
 	                                               "General",
@@ -1351,6 +1351,10 @@ static BOOL rdp_apply_input_capability_set(rdpSettings* settings, const rdpSetti
 		}
 		if (settings->HasExtendedMouseEvent)
 			settings->HasExtendedMouseEvent = src->HasExtendedMouseEvent;
+		if (settings->HasRelativeMouseEvent)
+			settings->HasRelativeMouseEvent = src->HasRelativeMouseEvent;
+		if (freerdp_settings_get_bool(settings, FreeRDP_HasQoeEvent))
+			settings->HasQoeEvent = freerdp_settings_get_bool(settings, FreeRDP_HasQoeEvent);
 	}
 	return TRUE;
 }
@@ -1404,8 +1408,14 @@ static BOOL rdp_read_input_capability_set(wStream* s, rdpSettings* settings)
 	if (!freerdp_settings_set_bool(settings, FreeRDP_UnicodeInput,
 	                               (inputFlags & INPUT_FLAG_UNICODE) ? TRUE : FALSE))
 		return FALSE;
+	if (!freerdp_settings_set_bool(settings, FreeRDP_HasRelativeMouseEvent,
+	                               (inputFlags & INPUT_FLAG_MOUSE_RELATIVE) ? TRUE : FALSE))
+		return FALSE;
 	if (!freerdp_settings_set_bool(settings, FreeRDP_HasExtendedMouseEvent,
 	                               (inputFlags & INPUT_FLAG_MOUSEX) ? TRUE : FALSE))
+		return FALSE;
+	if (!freerdp_settings_set_bool(settings, FreeRDP_HasQoeEvent,
+	                               (inputFlags & TS_INPUT_FLAG_QOE_TIMESTAMPS) ? TRUE : FALSE))
 		return FALSE;
 
 	return TRUE;
@@ -1431,11 +1441,17 @@ static BOOL rdp_write_input_capability_set(wStream* s, const rdpSettings* settin
 		inputFlags |= INPUT_FLAG_FASTPATH_INPUT2;
 	}
 
-	if (settings->HasHorizontalWheel)
+	if (freerdp_settings_get_bool(settings, FreeRDP_HasRelativeMouseEvent))
+		inputFlags |= INPUT_FLAG_MOUSE_RELATIVE;
+
+	if (freerdp_settings_get_bool(settings, FreeRDP_HasHorizontalWheel))
 		inputFlags |= TS_INPUT_FLAG_MOUSE_HWHEEL;
 
 	if (freerdp_settings_get_bool(settings, FreeRDP_UnicodeInput))
 		inputFlags |= INPUT_FLAG_UNICODE;
+
+	if (freerdp_settings_get_bool(settings, FreeRDP_HasQoeEvent))
+		inputFlags |= TS_INPUT_FLAG_QOE_TIMESTAMPS;
 
 	if (settings->HasExtendedMouseEvent)
 		inputFlags |= INPUT_FLAG_MOUSEX;
@@ -1930,12 +1946,12 @@ static void rdp_write_bitmap_cache_cell_info(wStream* s, BITMAP_CACHE_V2_CELL_IN
 
 static BOOL rdp_apply_bitmap_cache_v2_capability_set(rdpSettings* settings, const rdpSettings* src)
 {
-	size_t x;
-	const size_t keys[] = { FreeRDP_BitmapCacheEnabled, FreeRDP_BitmapCachePersistEnabled };
+	const FreeRDP_Settings_Keys_Bool keys[] = { FreeRDP_BitmapCacheEnabled,
+		                                        FreeRDP_BitmapCachePersistEnabled };
 
-	for (x = 0; x < ARRAYSIZE(keys); x++)
+	for (size_t x = 0; x < ARRAYSIZE(keys); x++)
 	{
-		const size_t id = keys[x];
+		const FreeRDP_Settings_Keys_Bool id = keys[x];
 		const BOOL val = freerdp_settings_get_bool(src, id);
 		if (!freerdp_settings_set_bool(settings, id, val))
 			return FALSE;
@@ -1948,7 +1964,7 @@ static BOOL rdp_apply_bitmap_cache_v2_capability_set(rdpSettings* settings, cons
 		                                 BitmapCacheV2NumCells))
 			return FALSE;
 
-		for (x = 0; x < BitmapCacheV2NumCells; x++)
+		for (size_t x = 0; x < BitmapCacheV2NumCells; x++)
 		{
 			const BITMAP_CACHE_V2_CELL_INFO* cdata =
 			    freerdp_settings_get_pointer_array(src, FreeRDP_BitmapCacheV2CellInfo, x);
@@ -2087,28 +2103,32 @@ static BOOL rdp_apply_virtual_channel_capability_set(rdpSettings* settings, cons
 	WINPR_ASSERT(src);
 
 	/* MS servers and clients disregard in advertising what is relevant for their own side */
-	if (settings->ServerMode && (settings->VirtualChannelCompressionFlags & VCCAPS_COMPR_SC) &&
-	    (src->VirtualChannelCompressionFlags & VCCAPS_COMPR_SC))
-		settings->VirtualChannelCompressionFlags |= VCCAPS_COMPR_SC;
+	if (settings->ServerMode && (settings->VCFlags & VCCAPS_COMPR_SC) &&
+	    (src->VCFlags & VCCAPS_COMPR_SC))
+		settings->VCFlags |= VCCAPS_COMPR_SC;
 	else
-		settings->VirtualChannelCompressionFlags &= ~VCCAPS_COMPR_SC;
+		settings->VCFlags &= ~VCCAPS_COMPR_SC;
 
-	if (!settings->ServerMode && (settings->VirtualChannelCompressionFlags & VCCAPS_COMPR_CS_8K) &&
-	    (src->VirtualChannelCompressionFlags & VCCAPS_COMPR_CS_8K))
-		settings->VirtualChannelCompressionFlags |= VCCAPS_COMPR_CS_8K;
+	if (!settings->ServerMode && (settings->VCFlags & VCCAPS_COMPR_CS_8K) &&
+	    (src->VCFlags & VCCAPS_COMPR_CS_8K))
+		settings->VCFlags |= VCCAPS_COMPR_CS_8K;
 	else
-		settings->VirtualChannelCompressionFlags &= ~VCCAPS_COMPR_CS_8K;
+		settings->VCFlags &= ~VCCAPS_COMPR_CS_8K;
 
 	/*
 	 * When one peer does not write the VCChunkSize, the VCChunkSize must not be
 	 * larger than CHANNEL_CHUNK_LENGTH (1600) bytes.
 	 * Also prevent an invalid 0 size.
 	 */
-	if (!settings->ServerMode &&
-	    ((src->VirtualChannelChunkSize > 16256) || (src->VirtualChannelChunkSize == 0)))
-		settings->VirtualChannelChunkSize = CHANNEL_CHUNK_LENGTH;
-	else if (!settings->ServerMode)
-		settings->VirtualChannelChunkSize = src->VirtualChannelChunkSize;
+	if (!settings->ServerMode)
+	{
+		if ((src->VCChunkSize > CHANNEL_CHUNK_MAX_LENGTH) || (src->VCChunkSize == 0))
+			settings->VCChunkSize = CHANNEL_CHUNK_LENGTH;
+		else
+		{
+			settings->VCChunkSize = src->VCChunkSize;
+		}
+	}
 
 	return TRUE;
 }
@@ -2134,8 +2154,8 @@ static BOOL rdp_read_virtual_channel_capability_set(wStream* s, rdpSettings* set
 	else
 		VCChunkSize = UINT32_MAX; /* Use an invalid value to determine that value is not present */
 
-	settings->VirtualChannelCompressionFlags = flags;
-	settings->VirtualChannelChunkSize = VCChunkSize;
+	settings->VCFlags = flags;
+	settings->VCChunkSize = VCChunkSize;
 
 	return TRUE;
 }
@@ -2152,8 +2172,8 @@ static BOOL rdp_write_virtual_channel_capability_set(wStream* s, const rdpSettin
 		return FALSE;
 
 	const size_t header = rdp_capability_set_start(s);
-	Stream_Write_UINT32(s, settings->VirtualChannelCompressionFlags); /* flags (4 bytes) */
-	Stream_Write_UINT32(s, settings->VirtualChannelChunkSize);        /* VCChunkSize (4 bytes) */
+	Stream_Write_UINT32(s, settings->VCFlags);     /* flags (4 bytes) */
+	Stream_Write_UINT32(s, settings->VCChunkSize); /* VCChunkSize (4 bytes) */
 	return rdp_capability_set_finish(s, header, CAPSET_TYPE_VIRTUAL_CHANNEL);
 }
 
@@ -2802,8 +2822,20 @@ static BOOL rdp_apply_surface_commands_capability_set(rdpSettings* settings, con
 	WINPR_ASSERT(settings);
 	WINPR_ASSERT(src);
 
-	settings->SurfaceCommandsEnabled = src->SurfaceCommandsEnabled;
-	settings->SurfaceFrameMarkerEnabled = src->SurfaceFrameMarkerEnabled;
+	/* [MS-RDPBCGR] 2.2.7.2.9 Surface Commands Capability Set (TS_SURFCMDS_CAPABILITYSET)
+	 *
+	 * disable surface commands if the remote does not support fastpath
+	 */
+	if (src->FastPathOutput)
+	{
+		settings->SurfaceCommandsEnabled = src->SurfaceCommandsEnabled;
+		settings->SurfaceFrameMarkerEnabled = src->SurfaceFrameMarkerEnabled;
+	}
+	else
+	{
+		settings->SurfaceCommandsEnabled = FALSE;
+		settings->SurfaceFrameMarkerEnabled = FALSE;
+	}
 
 	return TRUE;
 }
@@ -4238,55 +4270,15 @@ BOOL rdp_recv_get_active_header(rdpRdp* rdp, wStream* s, UINT16* pChannelId, UIN
 	return TRUE;
 }
 
-BOOL rdp_recv_demand_active(rdpRdp* rdp, wStream* s)
+BOOL rdp_recv_demand_active(rdpRdp* rdp, wStream* s, UINT16 pduSource, UINT16 length)
 {
-	UINT16 channelId;
-	UINT16 pduType;
-	UINT16 pduSource;
-	UINT16 length;
-	UINT16 lengthSourceDescriptor;
-	UINT16 lengthCombinedCapabilities;
+	UINT16 lengthSourceDescriptor = 0;
+	UINT16 lengthCombinedCapabilities = 0;
 
 	WINPR_ASSERT(rdp);
+	WINPR_ASSERT(rdp->settings);
 	WINPR_ASSERT(rdp->context);
 	WINPR_ASSERT(s);
-
-	if (!rdp_recv_get_active_header(rdp, s, &channelId, &length))
-		return FALSE;
-
-	if (freerdp_shall_disconnect_context(rdp->context))
-		return TRUE;
-
-	if (!rdp_read_share_control_header(rdp, s, NULL, NULL, &pduType, &pduSource))
-		return FALSE;
-
-	if (pduType == PDU_TYPE_DATA)
-	{
-		/*
-		 * We can receive a Save Session Info Data PDU containing a LogonErrorInfo
-		 * structure at this point from the server to indicate a connection error.
-		 */
-		state_run_t rc = rdp_recv_data_pdu(rdp, s);
-		if (state_run_failed(rc))
-			return FALSE;
-
-		return FALSE;
-	}
-
-	if (pduType != PDU_TYPE_DEMAND_ACTIVE)
-	{
-		if (pduType != PDU_TYPE_SERVER_REDIRECTION)
-		{
-			char buffer1[256] = { 0 };
-			char buffer2[256] = { 0 };
-
-			WLog_ERR(TAG, "expected %s, got %s",
-			         pdu_type_to_str(PDU_TYPE_DEMAND_ACTIVE, buffer1, sizeof(buffer1)),
-			         pdu_type_to_str(pduType, buffer2, sizeof(buffer2)));
-		}
-
-		return FALSE;
-	}
 
 	rdp->settings->PduSource = pduSource;
 
@@ -4640,4 +4632,32 @@ BOOL rdp_send_confirm_active(rdpRdp* rdp)
 	         rdp_send_pdu(rdp, s, PDU_TYPE_CONFIRM_ACTIVE, rdp->mcs->userId);
 	Stream_Release(s);
 	return status;
+}
+
+const char* rdp_input_flag_string(UINT16 flags, char* buffer, size_t len)
+{
+	char prefix[16] = { 0 };
+
+	_snprintf(prefix, sizeof(prefix), "[0x%04" PRIx16 "][", flags);
+	winpr_str_append(prefix, buffer, len, "");
+	if ((flags & INPUT_FLAG_SCANCODES) != 0)
+		winpr_str_append("INPUT_FLAG_SCANCODES", buffer, len, "|");
+	if ((flags & INPUT_FLAG_MOUSEX) != 0)
+		winpr_str_append("INPUT_FLAG_MOUSEX", buffer, len, "|");
+	if ((flags & INPUT_FLAG_FASTPATH_INPUT) != 0)
+		winpr_str_append("INPUT_FLAG_FASTPATH_INPUT", buffer, len, "|");
+	if ((flags & INPUT_FLAG_UNICODE) != 0)
+		winpr_str_append("INPUT_FLAG_UNICODE", buffer, len, "|");
+	if ((flags & INPUT_FLAG_FASTPATH_INPUT2) != 0)
+		winpr_str_append("INPUT_FLAG_FASTPATH_INPUT2", buffer, len, "|");
+	if ((flags & INPUT_FLAG_UNUSED1) != 0)
+		winpr_str_append("INPUT_FLAG_UNUSED1", buffer, len, "|");
+	if ((flags & INPUT_FLAG_MOUSE_RELATIVE) != 0)
+		winpr_str_append("INPUT_FLAG_MOUSE_RELATIVE", buffer, len, "|");
+	if ((flags & TS_INPUT_FLAG_MOUSE_HWHEEL) != 0)
+		winpr_str_append("TS_INPUT_FLAG_MOUSE_HWHEEL", buffer, len, "|");
+	if ((flags & TS_INPUT_FLAG_QOE_TIMESTAMPS) != 0)
+		winpr_str_append("TS_INPUT_FLAG_QOE_TIMESTAMPS", buffer, len, "|");
+	winpr_str_append("]", buffer, len, "");
+	return buffer;
 }

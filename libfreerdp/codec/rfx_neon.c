@@ -33,8 +33,7 @@
 /* rfx_decode_YCbCr_to_RGB_NEON code now resides in the primitives library. */
 
 static __inline void __attribute__((__gnu_inline__, __always_inline__, __artificial__))
-rfx_quantization_decode_block_NEON(INT16* WINPR_RESTRICT buffer, const int buffer_size,
-                                   const UINT32 factor)
+rfx_quantization_decode_block_NEON(INT16* buffer, const size_t buffer_size, const UINT32 factor)
 {
 	int16x8_t quantFactors = vdupq_n_s16(factor);
 	int16x8_t* buf = (int16x8_t*)buffer;
@@ -49,8 +48,7 @@ rfx_quantization_decode_block_NEON(INT16* WINPR_RESTRICT buffer, const int buffe
 	} while (buf < buf_end);
 }
 
-static void rfx_quantization_decode_NEON(INT16* WINPR_RESTRICT buffer,
-                                         const UINT32* WINPR_RESTRICT quantVals)
+static void rfx_quantization_decode_NEON(INT16* buffer, const UINT32* WINPR_RESTRICT quantVals)
 {
 	WINPR_ASSERT(buffer);
 	WINPR_ASSERT(quantVals);
@@ -69,17 +67,16 @@ static void rfx_quantization_decode_NEON(INT16* WINPR_RESTRICT buffer,
 
 static __inline void __attribute__((__gnu_inline__, __always_inline__, __artificial__))
 rfx_dwt_2d_decode_block_horiz_NEON(INT16* WINPR_RESTRICT l, INT16* WINPR_RESTRICT h,
-                                   INT16* WINPR_RESTRICT dst, int subband_width)
+                                   INT16* WINPR_RESTRICT dst, size_t subband_width)
 {
-	int y, n;
 	INT16* l_ptr = l;
 	INT16* h_ptr = h;
 	INT16* dst_ptr = dst;
 
-	for (y = 0; y < subband_width; y++)
+	for (size_t y = 0; y < subband_width; y++)
 	{
 		/* Even coefficients */
-		for (n = 0; n < subband_width; n += 8)
+		for (size_t n = 0; n < subband_width; n += 8)
 		{
 			// dst[2n] = l[n] - ((h[n-1] + h[n] + 1) >> 1);
 			int16x8_t l_n = vld1q_s16(l_ptr);
@@ -105,7 +102,7 @@ rfx_dwt_2d_decode_block_horiz_NEON(INT16* WINPR_RESTRICT l, INT16* WINPR_RESTRIC
 		h_ptr -= subband_width;
 
 		/* Odd coefficients */
-		for (n = 0; n < subband_width; n += 8)
+		for (size_t n = 0; n < subband_width; n += 8)
 		{
 			// dst[2n + 1] = (h[n] << 1) + ((dst[2n] + dst[2n + 2]) >> 1);
 			int16x8_t h_n = vld1q_s16(h_ptr);
@@ -133,18 +130,17 @@ rfx_dwt_2d_decode_block_horiz_NEON(INT16* WINPR_RESTRICT l, INT16* WINPR_RESTRIC
 
 static __inline void __attribute__((__gnu_inline__, __always_inline__, __artificial__))
 rfx_dwt_2d_decode_block_vert_NEON(INT16* WINPR_RESTRICT l, INT16* WINPR_RESTRICT h,
-                                  INT16* WINPR_RESTRICT dst, int subband_width)
+                                  INT16* WINPR_RESTRICT dst, size_t subband_width)
 {
-	int x, n;
 	INT16* l_ptr = l;
 	INT16* h_ptr = h;
 	INT16* dst_ptr = dst;
-	int total_width = subband_width + subband_width;
+	const size_t total_width = subband_width + subband_width;
 
 	/* Even coefficients */
-	for (n = 0; n < subband_width; n++)
+	for (size_t n = 0; n < subband_width; n++)
 	{
-		for (x = 0; x < total_width; x += 8)
+		for (size_t x = 0; x < total_width; x += 8)
 		{
 			// dst[2n] = l[n] - ((h[n-1] + h[n] + 1) >> 1);
 			int16x8_t l_n = vld1q_s16(l_ptr);
@@ -174,9 +170,9 @@ rfx_dwt_2d_decode_block_vert_NEON(INT16* WINPR_RESTRICT l, INT16* WINPR_RESTRICT
 	dst_ptr = dst + total_width;
 
 	/* Odd coefficients */
-	for (n = 0; n < subband_width; n++)
+	for (size_t n = 0; n < subband_width; n++)
 	{
-		for (x = 0; x < total_width; x += 8)
+		for (size_t x = 0; x < total_width; x += 8)
 		{
 			// dst[2n + 1] = (h[n] << 1) + ((dst[2n] + dst[2n + 2]) >> 1);
 			int16x8_t h_n = vld1q_s16(h_ptr);
@@ -205,7 +201,7 @@ rfx_dwt_2d_decode_block_vert_NEON(INT16* WINPR_RESTRICT l, INT16* WINPR_RESTRICT
 
 static __inline void __attribute__((__gnu_inline__, __always_inline__, __artificial__))
 rfx_dwt_2d_decode_block_NEON(INT16* WINPR_RESTRICT buffer, INT16* WINPR_RESTRICT idwt,
-                             int subband_width)
+                             size_t subband_width)
 {
 	INT16 *hl, *lh, *hh, *ll;
 	INT16 *l_dst, *h_dst;
@@ -226,7 +222,7 @@ rfx_dwt_2d_decode_block_NEON(INT16* WINPR_RESTRICT buffer, INT16* WINPR_RESTRICT
 	rfx_dwt_2d_decode_block_vert_NEON(l_dst, h_dst, buffer, subband_width);
 }
 
-static void rfx_dwt_2d_decode_NEON(INT16* WINPR_RESTRICT buffer, INT16* WINPR_RESTRICT dwt_buffer)
+static void rfx_dwt_2d_decode_NEON(INT16* buffer, INT16* dwt_buffer)
 {
 	rfx_dwt_2d_decode_block_NEON(buffer + 3840, dwt_buffer, 8);
 	rfx_dwt_2d_decode_block_NEON(buffer + 3072, dwt_buffer, 16);
@@ -470,8 +466,7 @@ static INLINE size_t prfx_get_band_h_count(size_t level)
 		return (64 + (1 << (level - 1))) >> level;
 }
 
-static INLINE void rfx_dwt_2d_decode_extrapolate_block_neon(INT16* WINPR_RESTRICT buffer,
-                                                            INT16* WINPR_RESTRICT temp,
+static INLINE void rfx_dwt_2d_decode_extrapolate_block_neon(INT16* buffer, INT16* temp,
                                                             size_t level)
 {
 	size_t nDstStepX;
@@ -513,8 +508,7 @@ static INLINE void rfx_dwt_2d_decode_extrapolate_block_neon(INT16* WINPR_RESTRIC
 	                               nBandL + nBandH);
 }
 
-static void rfx_dwt_2d_extrapolate_decode_neon(INT16* WINPR_RESTRICT buffer,
-                                               INT16* WINPR_RESTRICT temp)
+static void rfx_dwt_2d_extrapolate_decode_neon(INT16* buffer, INT16* temp)
 {
 	WINPR_ASSERT(buffer);
 	WINPR_ASSERT(temp);

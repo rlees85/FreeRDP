@@ -70,15 +70,17 @@ struct format_option_recurse
 /**
  * Log Layout
  */
-
-static void WLog_PrintMessagePrefixVA(wLog* log, wLogMessage* message, const char* format,
-                                      va_list args)
+WINPR_ATTR_FORMAT_ARG(3, 0)
+static void WLog_PrintMessagePrefixVA(wLog* log, wLogMessage* message,
+                                      WINPR_FORMAT_ARG const char* format, va_list args)
 {
 	WINPR_ASSERT(message);
 	vsnprintf(message->PrefixString, WLOG_MAX_PREFIX_SIZE - 1, format, args);
 }
 
-static void WLog_PrintMessagePrefix(wLog* log, wLogMessage* message, const char* format, ...)
+WINPR_ATTR_FORMAT_ARG(3, 4)
+static void WLog_PrintMessagePrefix(wLog* log, wLogMessage* message,
+                                    WINPR_FORMAT_ARG const char* format, ...)
 {
 	va_list args;
 	va_start(args, format);
@@ -260,7 +262,7 @@ BOOL WLog_Layout_GetMessagePrefix(wLog* log, wLogLayout* layout, wLogMessage* me
 		  &recurse }, /* function */
 		{ ENTRY("%hr"), ENTRY("%02u"), NULL, (void*)(size_t)localTime.wHour, NULL,
 		  &recurse }, /* hours */
-		{ ENTRY("%ln"), ENTRY("%s"), NULL, (void*)(size_t)message->LineNumber, NULL,
+		{ ENTRY("%ln"), ENTRY("%" PRIuz), NULL, (void*)(size_t)message->LineNumber, NULL,
 		  &recurse }, /* line number */
 		{ ENTRY("%lv"), ENTRY("%s"), NULL, (void*)WLOG_LEVELS[message->Level], NULL,
 		  &recurse }, /* log level */
@@ -287,7 +289,13 @@ BOOL WLog_Layout_GetMessagePrefix(wLog* log, wLogLayout* layout, wLogMessage* me
 
 	if (!replace_format_string(layout->FormatString, &recurse, format, ARRAYSIZE(format)))
 		return FALSE;
+
+	WINPR_PRAGMA_DIAG_PUSH
+	WINPR_PRAGMA_DIAG_IGNORED_FORMAT_SECURITY
+
 	WLog_PrintMessagePrefix(log, message, format);
+
+	WINPR_PRAGMA_DIAG_POP
 
 	return TRUE;
 }

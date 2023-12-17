@@ -20,6 +20,9 @@
  */
 
 #include <freerdp/config.h>
+
+#include "settings.h"
+
 #include <freerdp/crypto/certificate.h>
 
 #include <ctype.h>
@@ -29,6 +32,7 @@
 #include <winpr/path.h>
 #include <winpr/sysinfo.h>
 #include <winpr/registry.h>
+#include <winpr/wtsapi.h>
 
 #include <freerdp/settings.h>
 #include <freerdp/build-config.h>
@@ -37,7 +41,6 @@
 #include "../crypto/certificate.h"
 #include "../crypto/privatekey.h"
 #include "capabilities.h"
-#include "settings.h"
 
 #define TAG FREERDP_TAG("settings")
 
@@ -92,7 +95,8 @@ static BOOL settings_reg_query_bool_val(HKEY hKey, const TCHAR* sub, BOOL* value
 	return TRUE;
 }
 
-static BOOL settings_reg_query_dword(rdpSettings* settings, size_t id, HKEY hKey, const TCHAR* sub)
+static BOOL settings_reg_query_dword(rdpSettings* settings, FreeRDP_Settings_Keys_UInt32 id,
+                                     HKEY hKey, const TCHAR* sub)
 {
 	DWORD dwValue;
 
@@ -102,7 +106,8 @@ static BOOL settings_reg_query_dword(rdpSettings* settings, size_t id, HKEY hKey
 	return freerdp_settings_set_uint32(settings, id, dwValue);
 }
 
-static BOOL settings_reg_query_bool(rdpSettings* settings, size_t id, HKEY hKey, const TCHAR* sub)
+static BOOL settings_reg_query_bool(rdpSettings* settings, FreeRDP_Settings_Keys_Bool id, HKEY hKey,
+                                    const TCHAR* sub)
 {
 	DWORD dwValue;
 
@@ -136,8 +141,8 @@ static void settings_client_load_hkey_local_machine(rdpSettings* settings)
 		settings_reg_query_bool(settings, FreeRDP_MstscCookieMode, hKey, _T("MstscCookieMode"));
 		settings_reg_query_dword(settings, FreeRDP_CookieMaxLength, hKey, _T("CookieMaxLength"));
 		settings_reg_query_bool(settings, FreeRDP_BitmapCacheEnabled, hKey, _T("BitmapCache"));
-		settings_reg_query_bool(settings, FreeRDP_OffscreenSupportLevel, hKey,
-		                        _T("OffscreenBitmapCache"));
+		settings_reg_query_dword(settings, FreeRDP_OffscreenSupportLevel, hKey,
+		                         _T("OffscreenBitmapCache"));
 		settings_reg_query_dword(settings, FreeRDP_OffscreenCacheSize, hKey,
 		                         _T("OffscreenBitmapCacheSize"));
 		settings_reg_query_dword(settings, FreeRDP_OffscreenCacheEntries, hKey,
@@ -235,7 +240,8 @@ static void settings_server_load_hkey_local_machine(rdpSettings* settings)
 
 	settings_reg_query_bool(settings, FreeRDP_ExtSecurity, hKey, _T("ExtSecurity"));
 	settings_reg_query_bool(settings, FreeRDP_NlaSecurity, hKey, _T("NlaSecurity"));
-	settings_reg_query_bool(settings, FreeRDP_TlsSecLevel, hKey, _T("TlsSecurity"));
+	settings_reg_query_bool(settings, FreeRDP_TlsSecurity, hKey, _T("TlsSecurity"));
+	settings_reg_query_dword(settings, FreeRDP_TlsSecLevel, hKey, _T("TlsSecLevel"));
 	settings_reg_query_bool(settings, FreeRDP_RdpSecurity, hKey, _T("RdpSecurity"));
 
 	RegCloseKey(hKey);
@@ -261,6 +267,17 @@ static BOOL settings_get_computer_name(rdpSettings* settings)
 		computerName[MAX_COMPUTERNAME_LENGTH] = '\0';
 
 	return freerdp_settings_set_string(settings, FreeRDP_ComputerName, computerName);
+}
+
+void freerdp_settings_print_warnings(const rdpSettings* settings)
+{
+	const UINT32 level = freerdp_settings_get_uint32(settings, FreeRDP_GlyphSupportLevel);
+	if (level != GLYPH_SUPPORT_NONE)
+	{
+		char buffer[32] = { 0 };
+		WLog_WARN(TAG, "[experimental] enabled GlyphSupportLevel %s, expect visual artefacts!",
+		          freerdp_settings_glyph_level_string(level, buffer, sizeof(buffer)));
+	}
 }
 
 BOOL freerdp_settings_set_default_order_support(rdpSettings* settings)
@@ -340,6 +357,8 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 {
 	char* base;
 	char* issuers[] = { "FreeRDP", "FreeRDP-licenser" };
+	const BOOL server = (flags & FREERDP_SETTINGS_SERVER_MODE) != 0 ? TRUE : FALSE;
+	const BOOL remote = (flags & FREERDP_SETTINGS_REMOTE_MODE) != 0 ? TRUE : FALSE;
 	rdpSettings* settings = (rdpSettings*)calloc(1, sizeof(rdpSettings));
 
 	if (!settings)
@@ -366,6 +385,8 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	if (!freerdp_settings_set_bool(settings, FreeRDP_UnicodeInput, TRUE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_HasHorizontalWheel, TRUE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_HasExtendedMouseEvent, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_HasQoeEvent, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_HasRelativeMouseEvent, TRUE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_HiDefRemoteApp, TRUE) ||
 	    !freerdp_settings_set_uint32(
 	        settings, FreeRDP_RemoteApplicationSupportMask,
@@ -379,8 +400,7 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	                                 NEGOTIATE_ORDER_SUPPORT | ZERO_BOUNDS_DELTA_SUPPORT |
 	                                     COLOR_INDEX_SUPPORT) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_SupportHeartbeatPdu, TRUE) ||
-	    !freerdp_settings_set_bool(settings, FreeRDP_ServerMode,
-	                               (flags & FREERDP_SETTINGS_SERVER_MODE) ? TRUE : FALSE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_ServerMode, server) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_WaitForOutputBufferFlush, TRUE) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_ClusterInfoFlags, REDIRECTION_SUPPORTED) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_DesktopWidth, 1024) ||
@@ -389,7 +409,7 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	    !freerdp_settings_set_bool(settings, FreeRDP_Fullscreen, FALSE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GrabKeyboard, TRUE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_Decorations, TRUE) ||
-	    !freerdp_settings_set_uint32(settings, FreeRDP_RdpVersion, RDP_VERSION_10_11) ||
+	    !freerdp_settings_set_uint32(settings, FreeRDP_RdpVersion, RDP_VERSION_10_12) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_ColorDepth, 32) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_AadSecurity, FALSE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_ExtSecurity, FALSE) ||
@@ -624,12 +644,13 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	                                 WINDOW_LEVEL_SUPPORTED | WINDOW_LEVEL_SUPPORTED_EX) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_RemoteAppNumIconCaches, 3) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_RemoteAppNumIconCacheEntries, 12) ||
-	    !freerdp_settings_set_uint32(settings, FreeRDP_VirtualChannelChunkSize,
-	                                 CHANNEL_CHUNK_LENGTH) ||
+	    !freerdp_settings_set_uint32(settings, FreeRDP_VCChunkSize,
+	                                 (server && !remote) ? CHANNEL_CHUNK_MAX_LENGTH
+	                                                     : CHANNEL_CHUNK_LENGTH) ||
 	    /* [MS-RDPBCGR] 2.2.7.2.7 Large Pointer Capability Set (TS_LARGE_POINTER_CAPABILITYSET)
 	       requires at least this size */
 	    !freerdp_settings_set_uint32(settings, FreeRDP_MultifragMaxRequestSize,
-	                                 (flags & FREERDP_SETTINGS_SERVER_MODE) ? 0 : 608299) ||
+	                                 server ? 0 : 608299) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GatewayUseSameCredentials, FALSE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GatewayBypassLocal, FALSE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GatewayRpcTransport, TRUE) ||
@@ -739,7 +760,6 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 
 	settings_load_hkey_local_machine(settings);
 
-	settings->XSelectionAtom = NULL;
 	if (!freerdp_settings_set_string(settings, FreeRDP_ActionScript, "~/.config/freerdp/action.sh"))
 		goto out_fail;
 	if (!freerdp_settings_set_bool(settings, FreeRDP_SmartcardLogon, FALSE))
@@ -760,9 +780,10 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	const BOOL enable = freerdp_settings_get_bool(settings, FreeRDP_ServerMode);
 
 	{
-		const size_t keys[] = { FreeRDP_SupportDynamicTimeZone, FreeRDP_SupportGraphicsPipeline,
-			                    FreeRDP_SupportStatusInfoPdu, FreeRDP_SupportErrorInfoPdu,
-			                    FreeRDP_SupportAsymetricKeys };
+		const FreeRDP_Settings_Keys_Bool keys[] = {
+			FreeRDP_SupportDynamicTimeZone, FreeRDP_SupportGraphicsPipeline,
+			FreeRDP_SupportStatusInfoPdu, FreeRDP_SupportErrorInfoPdu, FreeRDP_SupportAsymetricKeys
+		};
 
 		for (size_t x = 0; x < ARRAYSIZE(keys); x++)
 		{
@@ -788,9 +809,6 @@ static void freerdp_settings_free_internal(rdpSettings* settings)
 	freerdp_dynamic_channel_collection_free(settings);
 
 	freerdp_capability_buffer_free(settings);
-	/* Extensions */
-	free(settings->XSelectionAtom);
-	settings->XSelectionAtom = NULL;
 
 	/* Free all strings, set other pointers NULL */
 	freerdp_settings_free_keys(settings, TRUE);
@@ -1069,9 +1087,6 @@ static BOOL freerdp_settings_int_buffer_copy(rdpSettings* _settings, const rdpSe
 	rc = freerdp_settings_set_string(_settings, FreeRDP_ActionScript,
 	                                 freerdp_settings_get_string(settings, FreeRDP_ActionScript));
 
-	if (settings->XSelectionAtom)
-		_settings->XSelectionAtom = _strdup(settings->XSelectionAtom);
-
 out_fail:
 	return rc;
 }
@@ -1118,7 +1133,6 @@ BOOL freerdp_settings_copy(rdpSettings* _settings, const rdpSettings* settings)
 	_settings->ServerLicenseProductIssuersCount = 0;
 	_settings->ServerLicenseProductIssuers = NULL;
 
-	_settings->XSelectionAtom = NULL;
 	if (!rc)
 		goto out_fail;
 
@@ -1155,8 +1169,10 @@ static void zfree(WCHAR* str, size_t len)
 }
 
 BOOL identity_set_from_settings_with_pwd(SEC_WINNT_AUTH_IDENTITY* identity,
-                                         const rdpSettings* settings, size_t UserId,
-                                         size_t DomainId, const WCHAR* Password, size_t pwdLen)
+                                         const rdpSettings* settings,
+                                         FreeRDP_Settings_Keys_String UserId,
+                                         FreeRDP_Settings_Keys_String DomainId,
+                                         const WCHAR* Password, size_t pwdLen)
 {
 	WINPR_ASSERT(identity);
 	WINPR_ASSERT(settings);
@@ -1177,7 +1193,9 @@ BOOL identity_set_from_settings_with_pwd(SEC_WINNT_AUTH_IDENTITY* identity,
 }
 
 BOOL identity_set_from_settings(SEC_WINNT_AUTH_IDENTITY_W* identity, const rdpSettings* settings,
-                                size_t UserId, size_t DomainId, size_t PwdId)
+                                FreeRDP_Settings_Keys_String UserId,
+                                FreeRDP_Settings_Keys_String DomainId,
+                                FreeRDP_Settings_Keys_String PwdId)
 {
 	WINPR_ASSERT(identity);
 	WINPR_ASSERT(settings);
@@ -1193,8 +1211,11 @@ BOOL identity_set_from_settings(SEC_WINNT_AUTH_IDENTITY_W* identity, const rdpSe
 }
 
 BOOL identity_set_from_smartcard_hash(SEC_WINNT_AUTH_IDENTITY_W* identity,
-                                      const rdpSettings* settings, size_t userId, size_t domainId,
-                                      size_t pwdId, const BYTE* certSha1, size_t sha1len)
+                                      const rdpSettings* settings,
+                                      FreeRDP_Settings_Keys_String userId,
+                                      FreeRDP_Settings_Keys_String domainId,
+                                      FreeRDP_Settings_Keys_String pwdId, const BYTE* certSha1,
+                                      size_t sha1len)
 {
 #ifdef _WIN32
 	CERT_CREDENTIAL_INFO certInfo = { sizeof(CERT_CREDENTIAL_INFO), { 0 } };
@@ -1222,4 +1243,29 @@ BOOL identity_set_from_smartcard_hash(SEC_WINNT_AUTH_IDENTITY_W* identity,
 		return FALSE;
 #endif /* _WIN32 */
 	return TRUE;
+}
+
+const char* freerdp_settings_glyph_level_string(UINT32 level, char* buffer, size_t size)
+{
+	const char* str = "GLYPH_SUPPORT_UNKNOWN";
+	switch (level)
+	{
+		case GLYPH_SUPPORT_NONE:
+			str = "GLYPH_SUPPORT_NONE";
+			break;
+		case GLYPH_SUPPORT_PARTIAL:
+			str = "GLYPH_SUPPORT_PARTIAL";
+			break;
+		case GLYPH_SUPPORT_FULL:
+			str = "GLYPH_SUPPORT_FULL";
+			break;
+		case GLYPH_SUPPORT_ENCODE:
+			str = "GLYPH_SUPPORT_ENCODE";
+			break;
+		default:
+			break;
+	}
+
+	_snprintf(buffer, size, "%s[0x%08" PRIx32 "]", str, level);
+	return buffer;
 }

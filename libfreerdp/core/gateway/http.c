@@ -25,6 +25,7 @@
 #include <winpr/print.h>
 #include <winpr/stream.h>
 #include <winpr/string.h>
+#include <winpr/rpc.h>
 
 #include <freerdp/log.h>
 #include <freerdp/crypto/crypto.h>
@@ -56,6 +57,7 @@ struct s_http_context
 	char* Connection;
 	char* Pragma;
 	char* RdgConnectionId;
+	char* RdgCorrelationId;
 	char* RdgAuthScheme;
 	BOOL websocketUpgrade;
 	char* SecWebsocketKey;
@@ -300,29 +302,106 @@ BOOL http_context_set_connection(HttpContext* context, const char* Connection)
 	return TRUE;
 }
 
-BOOL http_context_set_pragma(HttpContext* context, const char* Pragma)
+WINPR_ATTR_FORMAT_ARG(2, 0)
+static BOOL list_append(HttpContext* context, WINPR_FORMAT_ARG const char* str, va_list ap)
+{
+	BOOL rc = FALSE;
+	va_list vat;
+	char* Pragma = NULL;
+	size_t PragmaSize = 0;
+
+	va_copy(vat, ap);
+	const int size = winpr_vasprintf(&Pragma, &PragmaSize, str, ap);
+	va_end(vat);
+
+	if (size <= 0)
+		goto fail;
+
+	char* sstr = NULL;
+	size_t slen = 0;
+	if (context->Pragma)
+	{
+		winpr_asprintf(&sstr, &slen, "%s, %s", context->Pragma, Pragma);
+		free(Pragma);
+	}
+	else
+		sstr = Pragma;
+	free(context->Pragma);
+
+	context->Pragma = sstr;
+
+	rc = TRUE;
+
+fail:
+	va_end(ap);
+	return rc;
+}
+
+WINPR_ATTR_FORMAT_ARG(2, 3)
+BOOL http_context_set_pragma(HttpContext* context, WINPR_FORMAT_ARG const char* Pragma, ...)
 {
 	if (!context || !Pragma)
 		return FALSE;
 
 	free(context->Pragma);
-	context->Pragma = _strdup(Pragma);
+	context->Pragma = NULL;
 
-	if (!context->Pragma)
-		return FALSE;
-
-	return TRUE;
+	va_list ap;
+	va_start(ap, Pragma);
+	return list_append(context, Pragma, ap);
 }
 
-BOOL http_context_set_rdg_connection_id(HttpContext* context, const char* RdgConnectionId)
+WINPR_ATTR_FORMAT_ARG(2, 3)
+BOOL http_context_append_pragma(HttpContext* context, const char* Pragma, ...)
+{
+	if (!context || !Pragma)
+		return FALSE;
+
+	va_list ap;
+	va_start(ap, Pragma);
+	return list_append(context, Pragma, ap);
+}
+
+static char* guid2str(const GUID* guid)
+{
+	if (!guid)
+		return NULL;
+	char* strguid = NULL;
+	char bracedGuid[64] = { 0 };
+
+	RPC_STATUS rpcStatus = UuidToStringA(guid, &strguid);
+
+	if (rpcStatus != RPC_S_OK)
+		return NULL;
+
+	sprintf_s(bracedGuid, sizeof(bracedGuid), "{%s}", strguid);
+	RpcStringFreeA(&strguid);
+	return _strdup(bracedGuid);
+}
+
+BOOL http_context_set_rdg_connection_id(HttpContext* context, const GUID* RdgConnectionId)
 {
 	if (!context || !RdgConnectionId)
 		return FALSE;
 
 	free(context->RdgConnectionId);
-	context->RdgConnectionId = _strdup(RdgConnectionId);
+	context->RdgConnectionId = guid2str(RdgConnectionId);
 
 	if (!context->RdgConnectionId)
+		return FALSE;
+
+	return TRUE;
+}
+
+BOOL http_context_set_rdg_correlation_id(HttpContext* context, const GUID* RdgCorrelationId)
+{
+	if (!context || !RdgCorrelationId)
+		return FALSE;
+
+	free(context->RdgCorrelationId);
+	context->RdgCorrelationId = guid2str(RdgCorrelationId);
+
+	if (!context->RdgCorrelationId)
 		return FALSE;
 
 	return TRUE;
@@ -335,12 +414,12 @@ BOOL http_context_enable_websocket_upgrade(HttpContext* context, BOOL enable)
 
 	if (enable)
 	{
-		BYTE key[16];
-		if (winpr_RAND(key, sizeof(key)) != 0)
+		GUID key = { 0 };
+		if (RPC_S_OK != UuidCreate(&key))
 			return FALSE;
 
 		free(context->SecWebsocketKey);
-		context->SecWebsocketKey = crypto_base64_encode(key, sizeof(key));
+		context->SecWebsocketKey = crypto_base64_encode((BYTE*)&key, sizeof(key));
 		if (!context->SecWebsocketKey)
 			return FALSE;
 	}
@@ -396,6 +475,7 @@ void http_context_free(HttpContext* context)
 		free(context->Connection);
 		free(context->Pragma);
 		free(context->RdgConnectionId);
+		free(context->RdgCorrelationId);
 		free(context->RdgAuthScheme);
 		ListDictionary_Free(context->cookies);
 		free(context);
@@ -469,7 +549,7 @@ BOOL http_request_set_transfer_encoding(HttpRequest* request, TRANSFER_ENCODING 
 }
 
 WINPR_ATTR_FORMAT_ARG(2, 3)
-static BOOL http_encode_print(wStream* s, const char* fmt, ...)
+static BOOL http_encode_print(wStream* s, WINPR_FORMAT_ARG const char* fmt, ...)
 {
 	char* str;
 	va_list ap;
@@ -607,6 +687,12 @@ wStream* http_request_write(HttpContext* context, HttpRequest* request)
 	if (context->RdgConnectionId)
 	{
 		if (!http_encode_body_line(s, "RDG-Connection-Id", context->RdgConnectionId))
+			goto fail;
+	}
+
+	if (context->RdgCorrelationId)
+	{
+		if (!http_encode_body_line(s, "RDG-Correlation-Id", context->RdgCorrelationId))
 			goto fail;
 	}
 
@@ -956,7 +1042,7 @@ fail:
 	return rc;
 }
 
-static void http_response_print(wLog* log, DWORD level, HttpResponse* response)
+static void http_response_print(wLog* log, DWORD level, const HttpResponse* response)
 {
 	char buffer[64] = { 0 };
 
@@ -1229,6 +1315,7 @@ HttpResponse* http_response_recv(rdpTls* tls, BOOL readContentLength)
 			goto out_error;
 
 		response->BodyLength = Stream_GetPosition(response->data) - payloadOffset;
+
 		WINPR_ASSERT(response->BodyLength == 0);
 		bodyLength = response->BodyLength; /* expected body length */
 
@@ -1353,13 +1440,18 @@ HttpResponse* http_response_recv(rdpTls* tls, BOOL readContentLength)
 	}
 	Stream_SealLength(response->data);
 
+	/* Ensure '\0' terminated string */
+	if (!Stream_EnsureRemainingCapacity(response->data, 2))
+		goto out_error;
+	Stream_Write_UINT16(response->data, 0);
+
 	return response;
 out_error:
 	http_response_free(response);
 	return NULL;
 }
 
-const BYTE* http_response_get_body(HttpResponse* response)
+const BYTE* http_response_get_body(const HttpResponse* response)
 {
 	if (!response)
 		return NULL;
@@ -1451,21 +1543,21 @@ BOOL http_request_set_content_length(HttpRequest* request, size_t length)
 	return TRUE;
 }
 
-long http_response_get_status_code(HttpResponse* response)
+long http_response_get_status_code(const HttpResponse* response)
 {
 	WINPR_ASSERT(response);
 
 	return response->StatusCode;
 }
 
-size_t http_response_get_body_length(HttpResponse* response)
+size_t http_response_get_body_length(const HttpResponse* response)
 {
 	WINPR_ASSERT(response);
 
 	return (SSIZE_T)response->BodyLength;
 }
 
-const char* http_response_get_auth_token(HttpResponse* response, const char* method)
+const char* http_response_get_auth_token(const HttpResponse* response, const char* method)
 {
 	if (!response || !method)
 		return NULL;
@@ -1476,7 +1568,7 @@ const char* http_response_get_auth_token(HttpResponse* response, const char* met
 	return ListDictionary_GetItemValue(response->Authenticates, method);
 }
 
-const char* http_response_get_setcookie(HttpResponse* response, const char* cookie)
+const char* http_response_get_setcookie(const HttpResponse* response, const char* cookie)
 {
 	if (!response || !cookie)
 		return NULL;
@@ -1487,7 +1579,7 @@ const char* http_response_get_setcookie(HttpResponse* response, const char* cook
 	return ListDictionary_GetItemValue(response->SetCookie, cookie);
 }
 
-TRANSFER_ENCODING http_response_get_transfer_encoding(HttpResponse* response)
+TRANSFER_ENCODING http_response_get_transfer_encoding(const HttpResponse* response)
 {
 	if (!response)
 		return TransferEncodingUnknown;
@@ -1495,7 +1587,7 @@ TRANSFER_ENCODING http_response_get_transfer_encoding(HttpResponse* response)
 	return response->TransferEncoding;
 }
 
-BOOL http_response_is_websocket(HttpContext* http, HttpResponse* response)
+BOOL http_response_is_websocket(const HttpContext* http, const HttpResponse* response)
 {
 	BOOL isWebsocket = FALSE;
 	WINPR_DIGEST_CTX* sha1 = NULL;
@@ -1547,7 +1639,7 @@ out:
 	return isWebsocket;
 }
 
-void http_response_log_error_status(wLog* log, DWORD level, HttpResponse* response)
+void http_response_log_error_status(wLog* log, DWORD level, const HttpResponse* response)
 {
 	WINPR_ASSERT(log);
 	WINPR_ASSERT(response);

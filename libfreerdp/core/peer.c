@@ -22,6 +22,8 @@
 
 #include <freerdp/config.h>
 
+#include "settings.h"
+
 #include <winpr/assert.h>
 #include <winpr/crt.h>
 #include <winpr/winsock.h>
@@ -153,7 +155,7 @@ static int freerdp_peer_virtual_channel_write(freerdp_peer* client, HANDLE hChan
 	if (peerChannel->channelFlags & WTS_CHANNEL_OPTION_DYNAMIC)
 		return -1; /* not yet supported */
 
-	maxChunkSize = rdp->settings->VirtualChannelChunkSize;
+	maxChunkSize = rdp->settings->VCChunkSize;
 	totalLength = length;
 	flags = CHANNEL_FLAG_FIRST;
 
@@ -166,7 +168,7 @@ static int freerdp_peer_virtual_channel_write(freerdp_peer* client, HANDLE hChan
 
 		if (length > maxChunkSize)
 		{
-			chunkSize = rdp->settings->VirtualChannelChunkSize;
+			chunkSize = rdp->settings->VCChunkSize;
 		}
 		else
 		{
@@ -267,6 +269,7 @@ static BOOL freerdp_peer_initialize(freerdp_peer* client)
 		}
 	}
 
+	nego_set_RCG_supported(rdp->nego, settings->RemoteCredentialGuard);
 	if (!rdp_server_transition_to_state(rdp, CONNECTION_STATE_INITIAL))
 		return FALSE;
 

@@ -36,6 +36,7 @@
 
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
+#include <openssl/bn.h>
 
 #include "cert_common.h"
 #include "crypto.h"
@@ -53,6 +54,7 @@ BOOL read_bignum(BYTE** dst, UINT32* length, const BIGNUM* num, BOOL alloc)
 
 	if (alloc)
 	{
+		free(*dst);
 		*dst = NULL;
 		*length = 0;
 	}

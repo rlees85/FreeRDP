@@ -69,10 +69,11 @@ static const char* xf_input_get_class_string(int class)
 
 static BOOL register_input_events(xfContext* xfc, Window window)
 {
+#define MAX_NR_MASKS 64
 	int ndevices = 0;
 	int nmasks = 0;
-	XIEventMask evmasks[64] = { 0 };
-	BYTE masks[8][XIMaskLen(XI_LASTEVENT)] = { 0 };
+	XIEventMask evmasks[MAX_NR_MASKS] = { 0 };
+	BYTE masks[MAX_NR_MASKS][XIMaskLen(XI_LASTEVENT)] = { 0 };
 
 	WINPR_ASSERT(xfc);
 
@@ -81,7 +82,7 @@ static BOOL register_input_events(xfContext* xfc, Window window)
 
 	XIDeviceInfo* info = XIQueryDevice(xfc->display, XIAllDevices, &ndevices);
 
-	for (int i = 0; i < MIN(ndevices, 64); i++)
+	for (int i = 0; i < MIN(ndevices, MAX_NR_MASKS); i++)
 	{
 		BOOL used = FALSE;
 		XIDeviceInfo* dev = &info[i];
@@ -101,7 +102,7 @@ static BOOL register_input_events(xfContext* xfc, Window window)
 			switch (class->type)
 			{
 				case XITouchClass:
-					if (settings->MultiTouchInput)
+					if (freerdp_settings_get_bool(settings, FreeRDP_MultiTouchInput))
 					{
 						const XITouchClassInfo* t = (const XITouchClassInfo*)class;
 						if (t->mode == XIDirectTouch)
@@ -142,24 +143,26 @@ static BOOL register_input_events(xfContext* xfc, Window window)
 					{
 						double max_pressure = t->max;
 
-						if (strstr(dev->name, "Stylus Pen") || strstr(dev->name, "Pen Pen"))
+						char devName[200] = { 0 };
+						strncpy(devName, dev->name, ARRAYSIZE(devName) - 1);
+						CharLowerBuffA(devName, ARRAYSIZE(devName));
+
+						if (strstr(devName, "eraser") != NULL)
 						{
-							if (!freerdp_client_handle_pen(
+							if (freerdp_client_handle_pen(&xfc->common,
+							                              FREERDP_PEN_REGISTER |
+							                                  FREERDP_PEN_IS_INVERTED |
+							                                  FREERDP_PEN_HAS_PRESSURE,
+							                              dev->deviceid, max_pressure))
+								WLog_DBG(TAG, "registered eraser");
+						}
+						else if (strstr(devName, "stylus") != NULL ||
+						         strstr(devName, "pen") != NULL)
+						{
+							if (freerdp_client_handle_pen(
 							        &xfc->common, FREERDP_PEN_REGISTER | FREERDP_PEN_HAS_PRESSURE,
 							        dev->deviceid, max_pressure))
-								return FALSE;
-							WLog_DBG(TAG, "registered pen");
-						}
-						else if (strstr(dev->name, "Stylus Eraser") ||
-						         strstr(dev->name, "Pen Eraser"))
-						{
-							if (!freerdp_client_handle_pen(&xfc->common,
-							                               FREERDP_PEN_REGISTER |
-							                                   FREERDP_PEN_IS_INVERTED |
-							                                   FREERDP_PEN_HAS_PRESSURE,
-							                               dev->deviceid, max_pressure))
-								return FALSE;
-							WLog_DBG(TAG, "registered eraser");
+								WLog_DBG(TAG, "registered pen");
 						}
 					}
 					break;
@@ -195,7 +198,7 @@ static BOOL register_raw_events(xfContext* xfc, Window window)
 	settings = xfc->common.context.settings;
 	WINPR_ASSERT(settings);
 
-	if (freerdp_settings_get_bool(settings, FreeRDP_MouseUseRelativeMove))
+	if (freerdp_client_use_relative_mouse_events(&xfc->common))
 	{
 		XISetMask(mask_bytes, XI_RawMotion);
 		XISetMask(mask_bytes, XI_RawButtonPress);
@@ -682,13 +685,13 @@ static int xf_input_touch_remote(xfContext* xfc, XIDeviceEvent* event, int evtyp
 	return 0;
 }
 
-static int xf_input_pen_remote(xfContext* xfc, XIDeviceEvent* event, int evtype, int deviceid)
+static BOOL xf_input_pen_remote(xfContext* xfc, XIDeviceEvent* event, int evtype, int deviceid)
 {
 	int x, y;
 	RdpeiClientContext* rdpei = xfc->common.rdpei;
 
 	if (!rdpei)
-		return 0;
+		return FALSE;
 
 	xf_input_hide_cursor(xfc);
 	x = (int)event->event_x;
@@ -707,30 +710,43 @@ static int xf_input_pen_remote(xfContext* xfc, XIDeviceEvent* event, int evtype,
 		}
 	}
 
+	UINT32 flags = FREERDP_PEN_HAS_PRESSURE;
+	if ((evtype == XI_ButtonPress) || (evtype == XI_ButtonRelease))
+	{
+		WLog_DBG(TAG, "pen button %d", event->detail);
+		switch (event->detail)
+		{
+			case 1:
+				break;
+			case 3:
+				flags |= FREERDP_PEN_BARREL_PRESSED;
+				break;
+			default:
+				return FALSE;
+		}
+	}
+
 	switch (evtype)
 	{
 		case XI_ButtonPress:
-			if (!freerdp_client_handle_pen(&xfc->common,
-			                               FREERDP_PEN_PRESS | FREERDP_PEN_HAS_PRESSURE, deviceid,
-			                               x, y, pressure))
+			flags |= FREERDP_PEN_PRESS;
+			if (!freerdp_client_handle_pen(&xfc->common, flags, deviceid, x, y, pressure))
 				return FALSE;
 			break;
 		case XI_Motion:
-			if (!freerdp_client_handle_pen(&xfc->common,
-			                               FREERDP_PEN_MOTION | FREERDP_PEN_HAS_PRESSURE, deviceid,
-			                               x, y, pressure))
+			flags |= FREERDP_PEN_MOTION;
+			if (!freerdp_client_handle_pen(&xfc->common, flags, deviceid, x, y, pressure))
 				return FALSE;
 			break;
 		case XI_ButtonRelease:
-			if (!freerdp_client_handle_pen(&xfc->common,
-			                               FREERDP_PEN_RELEASE | FREERDP_PEN_HAS_PRESSURE, deviceid,
-			                               x, y, pressure))
+			flags |= FREERDP_PEN_RELEASE;
+			if (!freerdp_client_handle_pen(&xfc->common, flags, deviceid, x, y, pressure))
 				return FALSE;
 			break;
 		default:
 			break;
 	}
-	return 0;
+	return TRUE;
 }
 
 static int xf_input_pens_unhover(xfContext* xfc)
@@ -782,8 +798,8 @@ int xf_input_event(xfContext* xfc, const XEvent* xevent, XIDeviceEvent* event, i
 			break;
 		case XI_RawButtonPress:
 		case XI_RawButtonRelease:
-			xfc->xi_rawevent = xfc->common.mouse_grabbed &&
-			                   freerdp_settings_get_bool(settings, FreeRDP_MouseUseRelativeMove);
+			xfc->xi_rawevent =
+			    xfc->common.mouse_grabbed && freerdp_client_use_relative_mouse_events(&xfc->common);
 
 			if (xfc->xi_rawevent)
 			{
@@ -793,8 +809,8 @@ int xf_input_event(xfContext* xfc, const XEvent* xevent, XIDeviceEvent* event, i
 			}
 			break;
 		case XI_RawMotion:
-			xfc->xi_rawevent = xfc->common.mouse_grabbed &&
-			                   freerdp_settings_get_bool(settings, FreeRDP_MouseUseRelativeMove);
+			xfc->xi_rawevent =
+			    xfc->common.mouse_grabbed && freerdp_client_use_relative_mouse_events(&xfc->common);
 
 			if (xfc->xi_rawevent)
 			{
@@ -878,7 +894,11 @@ static int xf_input_handle_event_remote(xfContext* xfc, const XEvent* event)
 
 				if (freerdp_client_is_pen(&xfc->common, deviceid))
 				{
-					xf_input_pen_remote(xfc, cookie.cc->data, cookie.cc->evtype, deviceid);
+					if (!xf_input_pen_remote(xfc, cookie.cc->data, cookie.cc->evtype, deviceid))
+					{
+						// XXX: don't show cursor
+						xf_input_event(xfc, event, cookie.cc->data, cookie.cc->evtype);
+					}
 					break;
 				}
 			}
@@ -913,11 +933,11 @@ int xf_input_handle_event(xfContext* xfc, const XEvent* event)
 	settings = xfc->common.context.settings;
 	WINPR_ASSERT(settings);
 
-	if (settings->MultiTouchInput)
+	if (freerdp_settings_get_bool(settings, FreeRDP_MultiTouchInput))
 	{
 		return xf_input_handle_event_remote(xfc, event);
 	}
-	else if (settings->MultiTouchGestures)
+	else if (freerdp_settings_get_bool(settings, FreeRDP_MultiTouchGestures))
 	{
 		return xf_input_handle_event_local(xfc, event);
 	}

@@ -32,6 +32,7 @@
 
 #include <freerdp/channels/urbdrc.h>
 #include <freerdp/channels/rdpecam.h>
+#include <freerdp/channels/location.h>
 
 /**
  * Remote Desktop Plus - Overview of .rdp file settings:
@@ -145,6 +146,7 @@ struct rdp_file
 	DWORD RedirectDrives;              /* redirectdrives */
 	DWORD RedirectPrinters;            /* redirectprinters */
 	DWORD RedirectComPorts;            /* redirectcomports */
+	DWORD RedirectLocation;            /* redirectlocation */
 	DWORD RedirectSmartCards;          /* redirectsmartcards */
 	DWORD RedirectWebauthN;            /* redirectwebauthn */
 	LPSTR RedirectCameras;             /* camerastoredirect */
@@ -191,6 +193,14 @@ struct rdp_file
 
 	LPSTR ResourceProvider; /* resourceprovider */
 
+	LPSTR WvdEndpointPool;      /* wvd endpoint pool */
+	LPSTR geo;                  /* geo */
+	LPSTR armpath;              /* armpath */
+	LPSTR aadtenantid;          /* aadtenantid" */
+	LPSTR diagnosticserviceurl; /* diagnosticserviceurl */
+	LPSTR hubdiscoverygeourl;   /* hubdiscoverygeourl" */
+	LPSTR activityhint;         /* activityhint */
+
 	DWORD UseRedirectionServerName; /* use redirection server name */
 
 	LPSTR GatewayAccessToken; /* gatewayaccesstoken */
@@ -235,6 +245,7 @@ static const char key_str_shell_working_directory[] = "shell working directory";
 static const char key_str_gatewayhostname[] = "gatewayhostname";
 static const char key_str_gatewayaccesstoken[] = "gatewayaccesstoken";
 static const char key_str_resourceprovider[] = "resourceprovider";
+static const char str_resourceprovider_arm[] = "arm";
 static const char key_str_kdcproxyname[] = "kdcproxyname";
 static const char key_str_drivestoredirect[] = "drivestoredirect";
 static const char key_str_devicestoredirect[] = "devicestoredirect";
@@ -242,7 +253,15 @@ static const char key_str_winposstr[] = "winposstr";
 static const char key_str_pcb[] = "pcb";
 static const char key_str_selectedmonitors[] = "selectedmonitors";
 
-static const char resource_provider_arm[] = "arm";
+static const char key_str_wvd[] = "wvd endpoint pool";
+static const char key_str_geo[] = "geo";
+static const char key_str_armpath[] = "armpath";
+static const char key_str_aadtenantid[] = "aadtenantid";
+
+static const char key_str_diagnosticserviceurl[] = "diagnosticserviceurl";
+static const char key_str_hubdiscoverygeourl[] = "hubdiscoverygeourl";
+
+static const char key_str_activityhint[] = "activityhint";
 
 static const char key_int_rdgiskdcproxy[] = "rdgiskdcproxy";
 static const char key_int_use_redirection_server_name[] = "use redirection server name";
@@ -272,6 +291,7 @@ static const char key_int_redirectposdevices[] = "redirectposdevices";
 static const char key_int_redirectclipboard[] = "redirectclipboard";
 static const char key_int_redirectsmartcards[] = "redirectsmartcards";
 static const char key_int_redirectcomports[] = "redirectcomports";
+static const char key_int_redirectlocation[] = "redirectlocation";
 static const char key_int_redirectprinters[] = "redirectprinters";
 static const char key_int_redirectdrives[] = "redirectdrives";
 static const char key_int_server_port[] = "server port";
@@ -419,6 +439,8 @@ static BOOL freerdp_client_rdp_file_find_integer_entry(rdpFile* file, const char
 		*outValue = &file->RedirectPrinters;
 	else if (_stricmp(name, key_int_redirectcomports) == 0)
 		*outValue = &file->RedirectComPorts;
+	else if (_stricmp(name, key_int_redirectlocation) == 0)
+		*outValue = &file->RedirectLocation;
 	else if (_stricmp(name, key_int_redirectsmartcards) == 0)
 		*outValue = &file->RedirectSmartCards;
 	else if (_stricmp(name, key_int_redirectclipboard) == 0)
@@ -536,6 +558,20 @@ static BOOL freerdp_client_rdp_file_find_string_entry(rdpFile* file, const char*
 		*outValue = &file->GatewayHostname;
 	else if (_stricmp(name, key_str_resourceprovider) == 0)
 		*outValue = &file->ResourceProvider;
+	else if (_stricmp(name, key_str_wvd) == 0)
+		*outValue = &file->WvdEndpointPool;
+	else if (_stricmp(name, key_str_geo) == 0)
+		*outValue = &file->geo;
+	else if (_stricmp(name, key_str_armpath) == 0)
+		*outValue = &file->armpath;
+	else if (_stricmp(name, key_str_aadtenantid) == 0)
+		*outValue = &file->aadtenantid;
+	else if (_stricmp(name, key_str_diagnosticserviceurl) == 0)
+		*outValue = &file->diagnosticserviceurl;
+	else if (_stricmp(name, key_str_hubdiscoverygeourl) == 0)
+		*outValue = &file->hubdiscoverygeourl;
+	else if (_stricmp(name, key_str_activityhint) == 0)
+		*outValue = &file->activityhint;
 	else if (_stricmp(name, key_str_gatewayaccesstoken) == 0)
 		*outValue = &file->GatewayAccessToken;
 	else if (_stricmp(name, key_str_kdcproxyname) == 0)
@@ -642,12 +678,11 @@ static BOOL freerdp_client_parse_rdp_file_integer(rdpFile* file, const char* nam
 	return freerdp_client_rdp_file_set_integer(file, name, ivalue);
 }
 
-/**
+/** set a string value in the provided rdp file context
  *
  * @param file rdpFile
  * @param name name of the string
  * @param value value of the string to set
- * @param index line index of the rdpFile
  * @return 0 on success, 1 if the key wasn't found (not a standard key), -1 on error
  */
 
@@ -1020,7 +1055,7 @@ BOOL freerdp_client_parse_rdp_file_ex(rdpFile* file, const char* name, rdp_file_
 }
 
 static INLINE BOOL FILE_POPULATE_STRING(char** _target, const rdpSettings* _settings,
-                                        size_t _option)
+                                        FreeRDP_Settings_Keys_String _option)
 {
 	WINPR_ASSERT(_target);
 	WINPR_ASSERT(_settings);
@@ -1049,9 +1084,26 @@ static char* freerdp_client_channel_args_to_string(const rdpSettings* settings, 
 	                                           ARRAYSIZE(filters));
 }
 
+static BOOL rdp_opt_duplicate(const rdpSettings* _settings, FreeRDP_Settings_Keys_String _id,
+                              char** _key)
+{
+	WINPR_ASSERT(_settings);
+	WINPR_ASSERT(_key);
+	const char* tmp = freerdp_settings_get_string(_settings, _id);
+
+	if (tmp)
+	{
+		*_key = _strdup(tmp);
+		if (!*_key)
+			return FALSE;
+	}
+
+	return TRUE;
+}
+
 BOOL freerdp_client_populate_rdp_file_from_settings(rdpFile* file, const rdpSettings* settings)
 {
-	size_t index;
+	FreeRDP_Settings_Keys_String index;
 	UINT32 LoadBalanceInfoLength;
 	const char* GatewayHostname = NULL;
 	char* redirectCameras = NULL;
@@ -1144,7 +1196,24 @@ BOOL freerdp_client_populate_rdp_file_from_settings(rdpFile* file, const rdpSett
 	}
 
 	if (freerdp_settings_get_bool(settings, FreeRDP_GatewayArmTransport))
-		file->ResourceProvider = _strdup(resource_provider_arm);
+		file->ResourceProvider = _strdup(str_resourceprovider_arm);
+
+	if (!rdp_opt_duplicate(settings, FreeRDP_GatewayAvdWvdEndpointPool, &file->WvdEndpointPool))
+		return FALSE;
+	if (!rdp_opt_duplicate(settings, FreeRDP_GatewayAvdGeo, &file->geo))
+		return FALSE;
+	if (!rdp_opt_duplicate(settings, FreeRDP_GatewayAvdArmpath, &file->armpath))
+		return FALSE;
+	if (!rdp_opt_duplicate(settings, FreeRDP_GatewayAvdAadtenantid, &file->aadtenantid))
+		return FALSE;
+	if (!rdp_opt_duplicate(settings, FreeRDP_GatewayAvdDiagnosticserviceurl,
+	                       &file->diagnosticserviceurl))
+		return FALSE;
+	if (!rdp_opt_duplicate(settings, FreeRDP_GatewayAvdHubdiscoverygeourl,
+	                       &file->hubdiscoverygeourl))
+		return FALSE;
+	if (!rdp_opt_duplicate(settings, FreeRDP_GatewayAvdActivityhint, &file->activityhint))
+		return FALSE;
 
 	file->AudioCaptureMode = freerdp_settings_get_bool(settings, FreeRDP_AudioCapture);
 	file->BitmapCachePersistEnable =
@@ -1152,6 +1221,8 @@ BOOL freerdp_client_populate_rdp_file_from_settings(rdpFile* file, const rdpSett
 	file->Compression = freerdp_settings_get_bool(settings, FreeRDP_CompressionEnabled);
 	file->AuthenticationLevel = freerdp_settings_get_uint32(settings, FreeRDP_AuthenticationLevel);
 	file->GatewayUsageMethod = freerdp_settings_get_uint32(settings, FreeRDP_GatewayUsageMethod);
+	file->GatewayCredentialsSource =
+	    freerdp_settings_get_uint32(settings, FreeRDP_GatewayCredentialsSource);
 	file->PromptCredentialOnce =
 	    freerdp_settings_get_bool(settings, FreeRDP_GatewayUseSameCredentials);
 	file->PromptForCredentials = freerdp_settings_get_bool(settings, FreeRDP_PromptForCredentials);
@@ -1236,6 +1307,8 @@ BOOL freerdp_client_populate_rdp_file_from_settings(rdpFile* file, const rdpSett
 	file->RdgIsKdcProxy = freerdp_settings_get_bool(settings, FreeRDP_KerberosRdgIsProxy) ? 1 : 0;
 	file->RedirectComPorts = (freerdp_settings_get_bool(settings, FreeRDP_RedirectSerialPorts) ||
 	                          freerdp_settings_get_bool(settings, FreeRDP_RedirectParallelPorts));
+	file->RedirectLocation =
+	    freerdp_dynamic_channel_collection_find(settings, LOCATION_DVC_CHANNEL_NAME) ? TRUE : FALSE;
 	if (!FILE_POPULATE_STRING(&file->DrivesToRedirect, settings, FreeRDP_DrivesToRedirect) ||
 	    !FILE_POPULATE_STRING(&file->PreconnectionBlob, settings, FreeRDP_PreconnectionBlob) ||
 	    !FILE_POPULATE_STRING(&file->KdcProxyName, settings, FreeRDP_KerberosKdcUrl))
@@ -1339,12 +1412,9 @@ BOOL freerdp_client_write_rdp_file(const rdpFile* file, const char* name, BOOL u
 	return (status == 0) ? TRUE : FALSE;
 }
 
-#if __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wformat-nonliteral"
-#endif
+WINPR_ATTR_FORMAT_ARG(3, 4)
 static SSIZE_T freerdp_client_write_setting_to_buffer(char** buffer, size_t* bufferSize,
-                                                      const char* fmt, ...)
+                                                      WINPR_FORMAT_ARG const char* fmt, ...)
 {
 	va_list ap;
 	SSIZE_T len;
@@ -1385,9 +1455,6 @@ static SSIZE_T freerdp_client_write_setting_to_buffer(char** buffer, size_t* buf
 
 	return len;
 }
-#if __GNUC__
-#pragma GCC diagnostic pop
-#endif
 
 size_t freerdp_client_write_rdp_file_buffer(const rdpFile* file, char* buffer, size_t size)
 {
@@ -1467,6 +1534,7 @@ size_t freerdp_client_write_rdp_file_buffer(const rdpFile* file, char* buffer, s
 	WRITE_SETTING_INT(key_int_redirectdrives, file->RedirectDrives);
 	WRITE_SETTING_INT(key_int_redirectprinters, file->RedirectPrinters);
 	WRITE_SETTING_INT(key_int_redirectcomports, file->RedirectComPorts);
+	WRITE_SETTING_INT(key_int_redirectlocation, file->RedirectLocation);
 	WRITE_SETTING_INT(key_int_redirectsmartcards, file->RedirectSmartCards);
 	WRITE_SETTING_INT(key_int_redirectclipboard, file->RedirectClipboard);
 	WRITE_SETTING_INT(key_int_redirectposdevices, file->RedirectPosDevices);
@@ -1516,6 +1584,13 @@ size_t freerdp_client_write_rdp_file_buffer(const rdpFile* file, char* buffer, s
 	WRITE_SETTING_STR(key_str_shell_working_directory, file->ShellWorkingDirectory);
 	WRITE_SETTING_STR(key_str_gatewayhostname, file->GatewayHostname);
 	WRITE_SETTING_STR(key_str_resourceprovider, file->ResourceProvider);
+	WRITE_SETTING_STR(key_str_wvd, file->WvdEndpointPool);
+	WRITE_SETTING_STR(key_str_geo, file->geo);
+	WRITE_SETTING_STR(key_str_armpath, file->armpath);
+	WRITE_SETTING_STR(key_str_aadtenantid, file->aadtenantid);
+	WRITE_SETTING_STR(key_str_diagnosticserviceurl, file->diagnosticserviceurl);
+	WRITE_SETTING_STR(key_str_hubdiscoverygeourl, file->hubdiscoverygeourl);
+	WRITE_SETTING_STR(key_str_activityhint, file->activityhint);
 	WRITE_SETTING_STR(key_str_gatewayaccesstoken, file->GatewayAccessToken);
 	WRITE_SETTING_STR(key_str_kdcproxyname, file->KdcProxyName);
 	WRITE_SETTING_STR(key_str_drivestoredirect, file->DrivesToRedirect);
@@ -1579,6 +1654,7 @@ fail:
 	freerdp_addin_argv_free(args);
 	return NULL;
 }
+
 BOOL freerdp_client_populate_settings_from_rdp_file(const rdpFile* file, rdpSettings* settings)
 {
 	BOOL setDefaultConnectionType = TRUE;
@@ -1756,9 +1832,10 @@ BOOL freerdp_client_populate_settings_from_rdp_file(const rdpFile* file, rdpSett
 	if (~((size_t)file->ShellWorkingDirectory))
 	{
 		/* ShellWorkingDir is used for either, shell working dir or remote app working dir */
-		size_t targetId = (~file->RemoteApplicationMode && file->RemoteApplicationMode != 0)
-		                      ? FreeRDP_RemoteApplicationWorkingDir
-		                      : FreeRDP_ShellWorkingDirectory;
+		FreeRDP_Settings_Keys_String targetId =
+		    (~file->RemoteApplicationMode && file->RemoteApplicationMode != 0)
+		        ? FreeRDP_RemoteApplicationWorkingDir
+		        : FreeRDP_ShellWorkingDirectory;
 
 		if (!freerdp_settings_set_string(settings, targetId, file->ShellWorkingDirectory))
 			return FALSE;
@@ -1906,11 +1983,58 @@ BOOL freerdp_client_populate_settings_from_rdp_file(const rdpFile* file, rdpSett
 
 	if (~((size_t)file->ResourceProvider))
 	{
-		if (_stricmp(file->ResourceProvider, resource_provider_arm) == 0)
+		if (_stricmp(file->ResourceProvider, str_resourceprovider_arm) == 0)
 		{
 			if (!freerdp_settings_set_bool(settings, FreeRDP_GatewayArmTransport, TRUE))
 				return FALSE;
 		}
+	}
+
+	if (~((size_t)file->WvdEndpointPool))
+	{
+		if (!freerdp_settings_set_string(settings, FreeRDP_GatewayAvdWvdEndpointPool,
+		                                 file->WvdEndpointPool))
+			return FALSE;
+	}
+
+	if (~((size_t)file->geo))
+	{
+		if (!freerdp_settings_set_string(settings, FreeRDP_GatewayAvdGeo, file->geo))
+			return FALSE;
+	}
+
+	if (~((size_t)file->armpath))
+	{
+		if (!freerdp_settings_set_string(settings, FreeRDP_GatewayAvdArmpath, file->armpath))
+			return FALSE;
+	}
+
+	if (~((size_t)file->aadtenantid))
+	{
+		if (!freerdp_settings_set_string(settings, FreeRDP_GatewayAvdAadtenantid,
+		                                 file->aadtenantid))
+			return FALSE;
+	}
+
+	if (~((size_t)file->diagnosticserviceurl))
+	{
+		if (!freerdp_settings_set_string(settings, FreeRDP_GatewayAvdDiagnosticserviceurl,
+		                                 file->diagnosticserviceurl))
+			return FALSE;
+	}
+
+	if (~((size_t)file->hubdiscoverygeourl))
+	{
+		if (!freerdp_settings_set_string(settings, FreeRDP_GatewayAvdHubdiscoverygeourl,
+		                                 file->hubdiscoverygeourl))
+			return FALSE;
+	}
+
+	if (~((size_t)file->activityhint))
+	{
+		if (!freerdp_settings_set_string(settings, FreeRDP_GatewayAvdActivityhint,
+		                                 file->activityhint))
+			return FALSE;
 	}
 
 	if (~((size_t)file->GatewayAccessToken))
@@ -2171,6 +2295,17 @@ BOOL freerdp_client_populate_settings_from_rdp_file(const rdpFile* file, rdpSett
 			return FALSE;
 	}
 
+	if (~file->RedirectLocation)
+	{
+		size_t count = 0;
+		char** str =
+		    CommandLineParseCommaSeparatedValuesEx(LOCATION_DVC_CHANNEL_NAME, NULL, &count);
+		const BOOL rc = freerdp_client_add_dynamic_channel(settings, count, str);
+		free(str);
+		if (!rc)
+			return FALSE;
+	}
+
 	if (~file->RedirectDirectX)
 	{
 		/* What is this?! */
@@ -2376,14 +2511,20 @@ BOOL freerdp_client_populate_settings_from_rdp_file(const rdpFile* file, rdpSett
 
 	if (file->args->argc > 1)
 	{
-		const char* ConnectionFile = freerdp_settings_get_string(settings, FreeRDP_ConnectionFile);
-		settings->ConnectionFile = NULL;
+		WCHAR* ConnectionFile =
+		    freerdp_settings_get_string_as_utf16(settings, FreeRDP_ConnectionFile, NULL);
 
 		if (freerdp_client_settings_parse_command_line(settings, file->args->argc, file->args->argv,
 		                                               FALSE) < 0)
+		{
+			free(ConnectionFile);
 			return FALSE;
+		}
 
-		if (!freerdp_settings_set_string(settings, FreeRDP_ConnectionFile, ConnectionFile))
+		BOOL rc = freerdp_settings_set_string_from_utf16(settings, FreeRDP_ConnectionFile,
+		                                                 ConnectionFile);
+		free(ConnectionFile);
+		if (!rc)
 			return FALSE;
 	}
 
@@ -2437,7 +2578,7 @@ const char* freerdp_client_rdp_file_get_string_option(const rdpFile* file, const
 
 	if (freerdp_client_rdp_file_find_string_entry((rdpFile*)file, name, &value, &line))
 	{
-		if (value)
+		if (value && ~(size_t)(*value))
 			return *value;
 		if (line)
 			return line->sValue;
@@ -2458,7 +2599,7 @@ int freerdp_client_rdp_file_get_integer_option(const rdpFile* file, const char* 
 
 	if (freerdp_client_rdp_file_find_integer_entry((rdpFile*)file, name, &value, &line))
 	{
-		if (value)
+		if (value && ~(*value))
 			return *value;
 		if (line)
 			return (int)line->iValue;
@@ -2480,7 +2621,7 @@ rdpFile* freerdp_client_rdp_file_new(void)
 
 rdpFile* freerdp_client_rdp_file_new_ex(DWORD flags)
 {
-	rdpFile* file = (rdpFile*)malloc(sizeof(rdpFile));
+	rdpFile* file = (rdpFile*)calloc(1, sizeof(rdpFile));
 
 	if (!file)
 		return NULL;
@@ -2547,6 +2688,13 @@ void freerdp_client_rdp_file_free(rdpFile* file)
 		freerdp_client_file_string_check_free(file->DevicesToRedirect);
 		freerdp_client_file_string_check_free(file->WinPosStr);
 		freerdp_client_file_string_check_free(file->ResourceProvider);
+		freerdp_client_file_string_check_free(file->WvdEndpointPool);
+		freerdp_client_file_string_check_free(file->geo);
+		freerdp_client_file_string_check_free(file->armpath);
+		freerdp_client_file_string_check_free(file->aadtenantid);
+		freerdp_client_file_string_check_free(file->diagnosticserviceurl);
+		freerdp_client_file_string_check_free(file->hubdiscoverygeourl);
+		freerdp_client_file_string_check_free(file->activityhint);
 		free(file);
 	}
 }

@@ -52,27 +52,42 @@ static const char* type_str_for_flags(UINT32 flags)
 	return type;
 }
 
-static int sdl_show_dialog(rdpContext* context, const char* title, const char* message,
-                           Sint32 flags)
+static BOOL sdl_wait_for_result(rdpContext* context, Uint32 type, SDL_Event* result)
 {
-	if (!sdl_push_user_event(SDL_USEREVENT_SHOW_DIALOG, title, message, flags))
-		return 0;
+	const SDL_Event empty = { 0 };
+
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(result);
 
 	while (!freerdp_shall_disconnect_context(context))
 	{
-		SDL_Event event = { 0 };
-		const int rc = SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_USEREVENT_SHOW_RESULT,
-		                              SDL_USEREVENT_SHOW_RESULT);
+		*result = empty;
+		const int rc = SDL_PeepEvents(result, 1, SDL_GETEVENT, type, type);
 		if (rc > 0)
-			return event.user.code;
+			return TRUE;
 		Sleep(1);
 	}
-	return 0;
+	return FALSE;
+}
+
+static int sdl_show_dialog(rdpContext* context, const char* title, const char* message,
+                           Sint32 flags)
+{
+	SDL_Event event = { 0 };
+
+	if (!sdl_push_user_event(SDL_USEREVENT_SHOW_DIALOG, title, message, flags))
+		return 0;
+
+	if (!sdl_wait_for_result(context, SDL_USEREVENT_SHOW_RESULT, &event))
+		return 0;
+
+	return event.user.code;
 }
 
 BOOL sdl_authenticate_ex(freerdp* instance, char** username, char** password, char** domain,
                          rdp_auth_reason reason)
 {
+	SDL_Event event = { 0 };
 	BOOL res = FALSE;
 
 	const char* target = freerdp_settings_get_server_name(instance->context->settings);
@@ -107,27 +122,22 @@ BOOL sdl_authenticate_ex(freerdp* instance, char** username, char** password, ch
 	if (!sdl_push_user_event(SDL_USEREVENT_AUTH_DIALOG, title, u, d, p, reason))
 		goto fail;
 
-	while (!freerdp_shall_disconnect_context(instance->context))
+	if (!sdl_wait_for_result(instance->context, SDL_USEREVENT_AUTH_RESULT, &event))
+		goto fail;
+	else
 	{
-		SDL_Event event = { 0 };
-		const int rc = SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_USEREVENT_AUTH_RESULT,
-		                              SDL_USEREVENT_AUTH_RESULT);
-		if (rc > 0)
-		{
-			SDL_UserAuthArg* arg = reinterpret_cast<SDL_UserAuthArg*>(event.padding);
+		SDL_UserAuthArg* arg = reinterpret_cast<SDL_UserAuthArg*>(event.padding);
 
-			res = arg->result != 0 ? TRUE : FALSE;
+		res = arg->result > 0 ? TRUE : FALSE;
 
-			free(*username);
-			free(*domain);
-			free(*password);
-			*username = arg->user;
-			*domain = arg->domain;
-			*password = arg->password;
-			break;
-		}
-		Sleep(1);
+		free(*username);
+		free(*domain);
+		free(*password);
+		*username = arg->user;
+		*domain = arg->domain;
+		*password = arg->password;
 	}
+
 fail:
 	free(title);
 	return res;
@@ -163,25 +173,18 @@ BOOL sdl_choose_smartcard(freerdp* instance, SmartcardCertInfo** cert_list, DWOR
 		list.push_back(m.c_str());
 	}
 
+	SDL_Event event = { 0 };
 	const char* title = "Select a logon smartcard certificate";
 	if (gateway)
 		title = "Select a gateway logon smartcard certificate";
 	if (!sdl_push_user_event(SDL_USEREVENT_SCARD_DIALOG, title, list.data(), count))
 		goto fail;
 
-	while (!freerdp_shall_disconnect_context(instance->context))
-	{
-		SDL_Event event = { 0 };
-		const int rc = SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_USEREVENT_SCARD_RESULT,
-		                              SDL_USEREVENT_SCARD_RESULT);
-		if (rc > 0)
-		{
-			res = TRUE;
-			*choice = static_cast<DWORD>(event.user.code);
-			break;
-		}
-		Sleep(1);
-	}
+	if (!sdl_wait_for_result(instance->context, SDL_USEREVENT_SCARD_RESULT, &event))
+		goto fail;
+
+	res = (event.user.code >= 0) ? TRUE : FALSE;
+	*choice = static_cast<DWORD>(event.user.code);
 
 fail:
 	return res;
@@ -219,6 +222,10 @@ int sdl_logon_error_info(freerdp* instance, UINT32 data, UINT32 type)
 	if (!instance || !instance->context)
 		return -1;
 
+	/* ignore LOGON_MSG_SESSION_CONTINUE message */
+	if (type == LOGON_MSG_SESSION_CONTINUE)
+		return 0;
+
 	char* title = nullptr;
 	size_t tlen = 0;
 	winpr_asprintf(&title, &tlen, "[%s] info",
@@ -240,16 +247,10 @@ static DWORD sdl_show_ceritifcate_dialog(rdpContext* context, const char* title,
 	if (!sdl_push_user_event(SDL_USEREVENT_CERT_DIALOG, title, message))
 		return 0;
 
-	while (!freerdp_shall_disconnect_context(context))
-	{
-		SDL_Event event = { 0 };
-		const int rc = SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_USEREVENT_CERT_RESULT,
-		                              SDL_USEREVENT_CERT_RESULT);
-		if (rc > 0)
-			return static_cast<DWORD>(event.user.code);
-		Sleep(1);
-	}
-	return 0;
+	SDL_Event event = { 0 };
+	if (!sdl_wait_for_result(context, SDL_USEREVENT_CERT_RESULT, &event))
+		return 0;
+	return static_cast<DWORD>(event.user.code);
 }
 
 DWORD sdl_verify_changed_certificate_ex(freerdp* instance, const char* host, UINT16 port,
@@ -512,11 +513,19 @@ BOOL sdl_auth_dialog_show(const SDL_UserAuthArg* args)
 		rc = ilist.run(result);
 	}
 
-	if ((rc <= 0) || (result.size() < prompt.size()))
-		return FALSE;
+	if ((result.size() < prompt.size()))
+		rc = -1;
 
-	return sdl_push_user_event(SDL_USEREVENT_AUTH_RESULT, _strdup(result[0].c_str()),
-	                           _strdup(result[1].c_str()), _strdup(result[2].c_str()), rc);
+	char* user = nullptr;
+	char* domain = nullptr;
+	char* pwd = nullptr;
+	if (rc > 0)
+	{
+		user = _strdup(result[0].c_str());
+		domain = _strdup(result[1].c_str());
+		pwd = _strdup(result[2].c_str());
+	}
+	return sdl_push_user_event(SDL_USEREVENT_AUTH_RESULT, user, domain, pwd, rc);
 }
 
 BOOL sdl_scard_dialog_show(const char* title, Sint32 count, const char** list)

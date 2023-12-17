@@ -26,6 +26,7 @@
 #include <freerdp/crypto/privatekey.h>
 #include "../crypto/privatekey.h"
 #include <freerdp/utils/http.h>
+#include <freerdp/utils/aad.h>
 
 #include <winpr/crypto.h>
 
@@ -53,7 +54,7 @@ static BOOL get_encoded_rsa_params(wLog* wlog, rdpPrivateKey* key, char** e, cha
 static BOOL generate_pop_key(rdpAad* aad);
 
 WINPR_ATTR_FORMAT_ARG(2, 3)
-static SSIZE_T stream_sprintf(wStream* s, const char* fmt, ...)
+static SSIZE_T stream_sprintf(wStream* s, WINPR_FORMAT_ARG const char* fmt, ...)
 {
 	va_list ap;
 	va_start(ap, fmt);
@@ -210,7 +211,7 @@ cJSON* cJSON_ParseWithLength(const char* value, size_t buffer_length)
 static INLINE const char* aad_auth_result_to_string(DWORD code)
 {
 #define ERROR_CASE(cd, x) \
-	if (cd == (x))        \
+	if (cd == (DWORD)(x)) \
 		return #x;
 
 	ERROR_CASE(code, S_OK)
@@ -281,7 +282,9 @@ int aad_client_begin(rdpAad* aad)
 	WINPR_ASSERT(instance);
 
 	/* Get the host part of the hostname */
-	const char* hostname = freerdp_settings_get_string(settings, FreeRDP_ServerHostname);
+	const char* hostname = freerdp_settings_get_string(settings, FreeRDP_AadServerHostname);
+	if (!hostname)
+		hostname = freerdp_settings_get_string(settings, FreeRDP_ServerHostname);
 	if (!hostname)
 	{
 		WLog_Print(aad->log, WLOG_ERROR, "FreeRDP_ServerHostname == NULL");
@@ -830,3 +833,40 @@ BOOL aad_is_supported(void)
 	return FALSE;
 #endif
 }
+
+#ifdef WITH_AAD
+char* freerdp_utils_aad_get_access_token(wLog* log, const char* data, size_t length)
+{
+	char* token = NULL;
+	cJSON* access_token_prop = NULL;
+	const char* access_token_str = NULL;
+
+	cJSON* json = cJSON_ParseWithLength(data, length);
+	if (!json)
+	{
+		WLog_Print(log, WLOG_ERROR, "Failed to parse access token response [got %" PRIuz " bytes",
+		           length);
+		goto cleanup;
+	}
+
+	access_token_prop = cJSON_GetObjectItem(json, "access_token");
+	if (!access_token_prop)
+	{
+		WLog_Print(log, WLOG_ERROR, "Response has no \"access_token\" property");
+		goto cleanup;
+	}
+
+	access_token_str = cJSON_GetStringValue(access_token_prop);
+	if (!access_token_str)
+	{
+		WLog_Print(log, WLOG_ERROR, "Invalid value for \"access_token\"");
+		goto cleanup;
+	}
+
+	token = _strdup(access_token_str);
+
+cleanup:
+	cJSON_Delete(json);
+	return token;
+}
+#endif

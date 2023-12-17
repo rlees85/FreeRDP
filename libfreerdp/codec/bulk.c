@@ -21,6 +21,7 @@
 
 #include <freerdp/config.h>
 
+#include "../core/settings.h"
 #include "bulk.h"
 #include "../codec/mppc.h"
 #include "../codec/ncrush.h"

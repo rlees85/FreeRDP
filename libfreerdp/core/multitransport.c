@@ -21,6 +21,7 @@
 #include <freerdp/config.h>
 #include <freerdp/log.h>
 
+#include "settings.h"
 #include "rdp.h"
 #include "multitransport.h"
 

@@ -33,7 +33,9 @@ if (supported)
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 
-add_library(${PROJECT_NAME} MODULE
+include(MSVCRuntime)
+
+add_library(${PROJECT_NAME} SHARED
 	cap_main.c
 	cap_config.c
 	cap_config.h

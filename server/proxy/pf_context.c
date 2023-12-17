@@ -43,8 +43,12 @@ static UINT32 ChannelId_Hash(const void* key)
 	return *v;
 }
 
-static BOOL ChannelId_Compare(const UINT32* v1, const UINT32* v2)
+static BOOL ChannelId_Compare(const void* pv1, const void* pv2)
 {
+	const UINT32* v1 = pv1;
+	const UINT32* v2 = pv2;
+	WINPR_ASSERT(v1);
+	WINPR_ASSERT(v2);
 	return (*v1 == *v2);
 }
 
@@ -89,6 +93,12 @@ void StaticChannelContext_free(pServerStaticChannelContext* ctx)
 	free(ctx);
 }
 
+static void HashStaticChannelContext_free(void* ptr)
+{
+	pServerStaticChannelContext* ctx = (pServerStaticChannelContext*)ptr;
+	StaticChannelContext_free(ctx);
+}
+
 /* Proxy context initialization callback */
 static void client_to_proxy_context_free(freerdp_peer* client, rdpContext* ctx);
 static BOOL client_to_proxy_context_new(freerdp_peer* client, rdpContext* ctx)
@@ -126,10 +136,10 @@ static BOOL client_to_proxy_context_new(freerdp_peer* client, rdpContext* ctx)
 		goto error;
 
 	obj = HashTable_KeyObject(context->channelsByFrontId);
-	obj->fnObjectEquals = (OBJECT_EQUALS_FN)ChannelId_Compare;
+	obj->fnObjectEquals = ChannelId_Compare;
 
 	obj = HashTable_ValueObject(context->channelsByFrontId);
-	obj->fnObjectFree = (OBJECT_FREE_FN)StaticChannelContext_free;
+	obj->fnObjectFree = HashStaticChannelContext_free;
 
 	context->channelsByBackId = HashTable_New(FALSE);
 	if (!context->channelsByBackId)
@@ -138,7 +148,7 @@ static BOOL client_to_proxy_context_new(freerdp_peer* client, rdpContext* ctx)
 		goto error;
 
 	obj = HashTable_KeyObject(context->channelsByBackId);
-	obj->fnObjectEquals = (OBJECT_EQUALS_FN)ChannelId_Compare;
+	obj->fnObjectEquals = ChannelId_Compare;
 
 	return TRUE;
 
@@ -185,16 +195,15 @@ BOOL pf_context_init_server_context(freerdp_peer* client)
 }
 
 static BOOL pf_context_revert_str_settings(rdpSettings* dst, const rdpSettings* before, size_t nr,
-                                           const size_t* ids)
+                                           const FreeRDP_Settings_Keys_String* ids)
 {
-	size_t x;
 	WINPR_ASSERT(dst);
 	WINPR_ASSERT(before);
 	WINPR_ASSERT(ids || (nr == 0));
 
-	for (x = 0; x < nr; x++)
+	for (size_t x = 0; x < nr; x++)
 	{
-		size_t id = ids[x];
+		FreeRDP_Settings_Keys_String id = ids[x];
 		const char* what = freerdp_settings_get_string(before, id);
 		if (!freerdp_settings_set_string(dst, id, what))
 			return FALSE;
@@ -217,7 +226,8 @@ BOOL pf_context_copy_settings(rdpSettings* dst, const rdpSettings* src)
 {
 	BOOL rc = FALSE;
 	rdpSettings* before_copy;
-	const size_t to_revert[] = { FreeRDP_ConfigPath, FreeRDP_CertificateName };
+	const FreeRDP_Settings_Keys_String to_revert[] = { FreeRDP_ConfigPath,
+		                                               FreeRDP_CertificateName };
 
 	if (!dst || !src)
 		return FALSE;
@@ -227,22 +237,21 @@ BOOL pf_context_copy_settings(rdpSettings* dst, const rdpSettings* src)
 		return FALSE;
 
 	if (!freerdp_settings_copy(dst, src))
-	{
-		freerdp_settings_free(before_copy);
-		return FALSE;
-	}
+		goto out_fail;
 
 	/* keep original ServerMode value */
-	dst->ServerMode = before_copy->ServerMode;
+	if (!freerdp_settings_copy_item(dst, before_copy, FreeRDP_ServerMode))
+		goto out_fail;
 
 	/* revert some values that must not be changed */
 	if (!pf_context_revert_str_settings(dst, before_copy, ARRAYSIZE(to_revert), to_revert))
-		return FALSE;
+		goto out_fail;
 
-	if (!dst->ServerMode)
+	if (!freerdp_settings_get_bool(dst, FreeRDP_ServerMode))
 	{
 		/* adjust instance pointer */
-		dst->instance = before_copy->instance;
+		if (!freerdp_settings_copy_item(dst, before_copy, FreeRDP_instance))
+			goto out_fail;
 
 		/*
 		 * RdpServerRsaKey must be set to NULL if `dst` is client's context

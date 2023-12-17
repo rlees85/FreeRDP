@@ -20,6 +20,8 @@
 
 #include <freerdp/config.h>
 
+#include "settings.h"
+
 #include <winpr/assert.h>
 
 #include <freerdp/freerdp.h>
@@ -147,6 +149,9 @@ auth_status utils_authenticate(freerdp* instance, rdp_auth_reason reason, BOOL o
 
 	if (freerdp_shall_disconnect_context(instance->context))
 		return AUTH_FAILED;
+
+	if (settings->ConnectChildSession)
+		return AUTH_NO_CREDENTIALS;
 
 	/* Ask for auth data if no or an empty username was specified or no password was given */
 	if (utils_str_is_empty(freerdp_settings_get_string(settings, FreeRDP_Username)) ||
@@ -282,4 +287,15 @@ BOOL utils_abort_event_is_set(rdpRdp* rdp)
 	WINPR_ASSERT(rdp);
 	status = WaitForSingleObject(rdp->abortEvent, 0);
 	return status == WAIT_OBJECT_0;
+}
+
+const char* utils_is_vsock(const char* hostname)
+{
+	if (!hostname)
+		return NULL;
+
+	const char vsock[8] = "vsock://";
+	if (strncmp(hostname, vsock, sizeof(vsock)) == 0)
+		return &hostname[sizeof(vsock)];
+	return NULL;
 }

@@ -11,6 +11,8 @@
 #cmakedefine AVRESAMPLE_FOUND
 
 /* Options */
+#cmakedefine WITH_OPAQUE_SETTINGS
+
 #cmakedefine WITH_ADD_PLUGIN_TO_RPATH
 #cmakedefine WITH_PROFILER
 #cmakedefine WITH_GPROF
@@ -34,6 +36,7 @@
 #cmakedefine WITH_OPENSLES
 #cmakedefine WITH_GSM
 #cmakedefine WITH_LAME
+#cmakedefine WITH_OPUS
 #cmakedefine WITH_FAAD2
 #cmakedefine WITH_FAAC
 #cmakedefine WITH_SOXR
@@ -90,6 +93,9 @@
 #cmakedefine CHANNEL_GFXREDIR
 #cmakedefine CHANNEL_GFXREDIR_CLIENT
 #cmakedefine CHANNEL_GFXREDIR_SERVER
+#cmakedefine CHANNEL_LOCATION
+#cmakedefine CHANNEL_LOCATION_CLIENT
+#cmakedefine CHANNEL_LOCATION_SERVER
 #cmakedefine CHANNEL_PARALLEL
 #cmakedefine CHANNEL_PARALLEL_CLIENT
 #cmakedefine CHANNEL_PARALLEL_SERVER
@@ -114,6 +120,9 @@
 #cmakedefine CHANNEL_RDPGFX
 #cmakedefine CHANNEL_RDPGFX_CLIENT
 #cmakedefine CHANNEL_RDPGFX_SERVER
+#cmakedefine CHANNEL_RDPEMSC
+#cmakedefine CHANNEL_RDPEMSC_CLIENT
+#cmakedefine CHANNEL_RDPEMSC_SERVER
 #cmakedefine CHANNEL_RDPSND
 #cmakedefine CHANNEL_RDPSND_CLIENT
 #cmakedefine CHANNEL_RDPSND_SERVER
@@ -177,5 +186,7 @@
 /* Proxy */
 #cmakedefine WITH_PROXY_MODULES
 #cmakedefine WITH_PROXY_EMULATE_SMARTCARD
+
+#cmakedefine HAVE_AF_VSOCK_H
 
 #endif /* FREERDP_CONFIG_H */

@@ -32,7 +32,9 @@ endif()
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_library(${PROJECT_NAME} MODULE
+include(MSVCRuntime)
+
+add_library(${PROJECT_NAME} SHARED
 	demo.cpp
 )
 

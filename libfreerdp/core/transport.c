@@ -19,6 +19,8 @@
 
 #include <freerdp/config.h>
 
+#include "settings.h"
+
 #include <winpr/assert.h>
 
 #include <winpr/crt.h>
@@ -53,6 +55,8 @@
 #include "proxy.h"
 #include "utils.h"
 #include "state.h"
+#include "childsession.h"
+#include "settings.h"
 
 #include "gateway/rdg.h"
 #include "gateway/wst.h"
@@ -120,7 +124,9 @@ static void transport_ssl_cb(SSL* ssl, int where, int ret)
 				{
 					if (!freerdp_get_last_error(transport_get_context(transport)))
 					{
-						UINT32 kret = nla_get_error(transport->nla);
+						UINT32 kret = 0;
+						if (transport->nla)
+							kret = nla_get_error(transport->nla);
 						if (kret == 0)
 							kret = FREERDP_ERROR_CONNECT_PASSWORD_CERTAINLY_EXPIRED;
 						freerdp_set_last_error_log(transport_get_context(transport), kret);
@@ -574,6 +580,18 @@ BOOL transport_connect(rdpTransport* transport, const char* hostname, UINT16 por
 	}
 
 	return status;
+}
+
+BOOL transport_connect_childsession(rdpTransport* transport)
+{
+	WINPR_ASSERT(transport);
+
+	transport->frontBio = createChildSessionBio();
+	if (!transport->frontBio)
+		return FALSE;
+
+	transport->layer = TRANSPORT_LAYER_TSG;
+	return TRUE;
 }
 
 BOOL transport_accept_rdp(rdpTransport* transport)

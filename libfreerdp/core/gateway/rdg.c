@@ -19,6 +19,8 @@
 
 #include <freerdp/config.h>
 
+#include "../settings.h"
+
 #include <winpr/assert.h>
 
 #include <winpr/crt.h>
@@ -41,7 +43,6 @@
 #include "../../crypto/opensslcompat.h"
 #include "rpc_fault.h"
 #include "../utils.h"
-#include "../settings.h"
 
 #define TAG FREERDP_TAG("core.gateway.rdg")
 
@@ -2141,9 +2142,6 @@ static BIO_METHOD* BIO_s_rdg(void)
 rdpRdg* rdg_new(rdpContext* context)
 {
 	rdpRdg* rdg;
-	RPC_CSTR stringUuid;
-	char bracedUuid[40];
-	RPC_STATUS rpcStatus;
 
 	if (!context)
 		return NULL;
@@ -2162,13 +2160,7 @@ rdpRdg* rdg_new(rdpContext* context)
 			rdg->extAuth = HTTP_EXTENDED_AUTH_PAA;
 
 		UuidCreate(&rdg->guid);
-		rpcStatus = UuidToStringA(&rdg->guid, &stringUuid);
 
-		if (rpcStatus == RPC_S_OUT_OF_MEMORY)
-			goto rdg_alloc_error;
-
-		sprintf_s(bracedUuid, sizeof(bracedUuid), "{%s}", stringUuid);
-		RpcStringFreeA(&stringUuid);
 		rdg->tlsOut = freerdp_tls_new(rdg->settings);
 
 		if (!rdg->tlsOut)
@@ -2191,7 +2183,8 @@ rdpRdg* rdg_new(rdpContext* context)
 		    !http_context_set_connection(rdg->http, "Keep-Alive") ||
 		    !http_context_set_user_agent(rdg->http, "MS-RDGateway/1.0") ||
 		    !http_context_set_host(rdg->http, rdg->settings->GatewayHostname) ||
-		    !http_context_set_rdg_connection_id(rdg->http, bracedUuid) ||
+		    !http_context_set_rdg_connection_id(rdg->http, &rdg->guid) ||
+		    !http_context_set_rdg_correlation_id(rdg->http, &rdg->guid) ||
 		    !http_context_enable_websocket_upgrade(
 		        rdg->http,
 		        freerdp_settings_get_bool(rdg->settings, FreeRDP_GatewayHttpUseWebsockets)))

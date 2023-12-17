@@ -18,17 +18,14 @@
  */
 
 #include <winpr/config.h>
+#include <winpr/platform.h>
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wreserved-id-macro"
-#endif
+WINPR_PRAGMA_DIAG_PUSH
+WINPR_PRAGMA_DIAG_IGNORED_RESERVED_ID_MACRO
 
 #define _FILE_OFFSET_BITS 64
 
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
+WINPR_PRAGMA_DIAG_POP
 
 #include <errno.h>
 
@@ -132,83 +129,6 @@ void free_synthetic_file(struct synthetic_file* file)
 	free(file->local_name);
 	free(file->remote_name);
 	free(file);
-}
-
-static unsigned char hex_to_dec(char c, BOOL* valid)
-{
-	WINPR_ASSERT(valid);
-
-	if (('0' <= c) && (c <= '9'))
-		return (c - '0');
-
-	if (('a' <= c) && (c <= 'f'))
-		return (c - 'a') + 10;
-
-	if (('A' <= c) && (c <= 'F'))
-		return (c - 'A') + 10;
-
-	*valid = FALSE;
-	return 0;
-}
-
-static BOOL decode_percent_encoded_byte(const char* str, const char* end, char* value)
-{
-	BOOL valid = TRUE;
-
-	WINPR_ASSERT(str);
-	WINPR_ASSERT(end);
-	WINPR_ASSERT(value);
-
-	if ((end < str) || ((size_t)(end - str) < strlen("%20")))
-		return FALSE;
-
-	*value = 0;
-	*value |= hex_to_dec(str[1], &valid);
-	*value <<= 4;
-	*value |= hex_to_dec(str[2], &valid);
-	return valid;
-}
-
-static char* decode_percent_encoded_string(const char* str, size_t len)
-{
-	char* buffer = NULL;
-	char* next = NULL;
-	const char* cur = str;
-	const char* lim = str + len;
-
-	WINPR_ASSERT(str);
-
-	/* Percent decoding shrinks data length, so len bytes will be enough. */
-	buffer = calloc(len + 1, sizeof(char));
-
-	if (!buffer)
-		return NULL;
-
-	next = buffer;
-
-	while (cur < lim)
-	{
-		if (*cur != '%')
-		{
-			*next++ = *cur++;
-		}
-		else
-		{
-			if (!decode_percent_encoded_byte(cur, lim, next))
-			{
-				WLog_ERR(TAG, "invalid percent encoding");
-				goto error;
-			}
-
-			cur += strlen("%20");
-			next += 1;
-		}
-	}
-
-	return buffer;
-error:
-	free(buffer);
-	return NULL;
 }
 
 /*
@@ -457,16 +377,10 @@ static BOOL process_uri(wClipboard* clipboard, const char* uri, size_t uri_len)
 	// URI is specified by RFC 8089: https://datatracker.ietf.org/doc/html/rfc8089
 	BOOL result = FALSE;
 	char* name = NULL;
-	char* localName = NULL;
 
 	WINPR_ASSERT(clipboard);
 
-	localName = parse_uri_to_local_file(uri, uri_len);
-	if (localName)
-	{
-		name = decode_percent_encoded_string(localName, strlen(localName));
-		free(localName);
-	}
+	name = parse_uri_to_local_file(uri, uri_len);
 	if (name)
 	{
 		WCHAR* wname = NULL;

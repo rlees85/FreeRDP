@@ -15,6 +15,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Include our extra modules
+set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/)
+
 if (NOT FREERDP_UNIFIED_BUILD)
 	cmake_minimum_required(VERSION 3.13)
 	project(WinPR LANGUAGES C)
@@ -49,6 +52,8 @@ if (NOT FREERDP_UNIFIED_BUILD)
 			set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fvisibility=hidden")
 		endif()
 	endif()
+
+	include(MSVCRuntime)
 endif()
 
 set(DEFAULT_DEBUG_OPTION OFF)
@@ -56,8 +61,15 @@ set(DEFAULT_DEBUG_OPTION OFF)
 if (WIN32 AND NOT UWP)
 	set(NATIVE_SSPI ON)
 endif()
+
+if(NOT ANDROID AND NOT IOS AND NOT UWP)
+	set(TOOLS_DEFAULT ON)
+else()
+	set(TOOLS_DEFAULT OFF)
+endif()
+
 option(WITH_VERBOSE_WINPR_ASSERT "Compile with verbose WINPR_ASSERT." ON)
-option(WITH_WINPR_TOOLS "Build WinPR helper binaries" ON)
+option(WITH_WINPR_TOOLS "Build WinPR helper binaries" ${TOOLS_DEFAULT})
 option(WITH_WINPR_DEPRECATED "Build WinPR deprecated symbols" OFF)
 option(WITH_DEBUG_THREADS "Print thread debug messages, enables handle dump" ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_EVENTS "Print event debug messages, enables handle dump" ${DEFAULT_DEBUG_OPTION})
@@ -103,8 +115,7 @@ include(CheckSymbolExists)
 include(CheckStructHasMember)
 include(TestBigEndian)
 
-# Include our extra modules
-set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/)
+include(PreventInSourceBuilds)
 
 # Check for cmake compatibility (enable/disable features)
 include(CheckCmakeCompat)
@@ -122,7 +133,7 @@ endif()
 
 # Soname versioning
 set(VERSION_REGEX "^(.*)([0-9]+)\\.([0-9]+)\\.([0-9]+)-?(.*)")
-set(RAW_VERSION_STRING "3.0.0-dev4")
+set(RAW_VERSION_STRING "3.0.1-dev0")
 if(EXISTS "${PROJECT_SOURCE_DIR}/.source_tag")
 	file(READ ${PROJECT_SOURCE_DIR}/.source_tag RAW_VERSION_STRING)
 elseif(USE_VERSION_FROM_GIT_TAG)
@@ -314,7 +325,7 @@ set(WINPR_INCLUDE_DIR "include/winpr${WINPR_VERSION_MAJOR}")
 
 add_subdirectory(libwinpr)
 
-if(NOT ANDROID AND NOT IOS AND NOT UWP AND WITH_WINPR_TOOLS)
+if(WITH_WINPR_TOOLS)
 	add_subdirectory(tools)
 endif()
 
@@ -343,6 +354,6 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/WinPRConfig.cmake ${CMAKE_CURRENT_BINA
 
 install(EXPORT WinPRTargets DESTINATION ${WINPR_CMAKE_INSTALL_DIR})
 
+include(pkg-config-install-prefix)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/winpr.pc.in ${CMAKE_CURRENT_BINARY_DIR}/winpr${WINPR_VERSION_MAJOR}.pc @ONLY)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/winpr${WINPR_VERSION_MAJOR}.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
-

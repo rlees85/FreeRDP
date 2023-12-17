@@ -26,7 +26,9 @@ set(CMAKE_CXX_EXTENSIONS ON)
 option(CMAKE_COLOR_MAKEFILE "colorful CMake makefile" ON)
 option(CMAKE_VERBOSE_MAKEFILE "verbose CMake makefile" ON)
 option(CMAKE_POSITION_INDEPENDENT_CODE "build with position independent code (-fPIC or -fPIE)" ON)
+
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/)
+include(PreventInSourceBuilds)
 
 include(ConfigureFreeRDP)
 
@@ -44,25 +46,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Configure MSVC Runtime
-if(MSVC)
-	include(MSVCRuntime)
-	if(NOT DEFINED MSVC_RUNTIME)
-		set(MSVC_RUNTIME "dynamic" CACHE STRING "MSVC runtime type [dynamic|static]")
-	endif()
-	if(MSVC_RUNTIME STREQUAL "static")
-		if(BUILD_SHARED_LIBS)
-			message(FATAL_ERROR "Static CRT is only supported in a fully static build")
-		endif()
-		message(STATUS "Use the MSVC static runtime option carefully!")
-		message(STATUS "OpenSSL uses /MD by default, and is very picky")
-		message(STATUS "Random freeing errors are a common sign of runtime issues")
-	endif()
-	configure_msvc_runtime()
-
-	if(NOT DEFINED CMAKE_SUPPRESS_REGENERATION)
-		set(CMAKE_SUPPRESS_REGENERATION ON)
-	endif()
-endif()
+include(MSVCRuntime)
 
 if(WITH_WIN_CONSOLE)
   set(WIN32_GUI_FLAG "")

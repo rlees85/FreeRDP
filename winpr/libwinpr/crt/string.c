@@ -30,6 +30,10 @@
 #include <winpr/assert.h>
 #include <winpr/endian.h>
 
+#if defined(WITH_URIPARSER)
+#include <uriparser/Uri.h>
+#endif
+
 /* String Manipulation (CRT): http://msdn.microsoft.com/en-us/library/f0151s4x.aspx */
 
 #include "../log.h"
@@ -39,6 +43,37 @@
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 #endif
 
+#if defined(WITH_URIPARSER)
+char* winpr_str_url_decode(const char* str, size_t len)
+{
+	char* dst = strndup(str, len);
+	if (!dst)
+		return NULL;
+
+	if (!uriUnescapeInPlaceExA(dst, URI_FALSE, URI_FALSE))
+	{
+		free(dst);
+		return NULL;
+	}
+
+	return dst;
+}
+
+char* winpr_str_url_encode(const char* str, size_t len)
+{
+	char* dst = calloc(len + 1, sizeof(char) * 3);
+	if (!dst)
+		return NULL;
+
+	if (!uriEscapeA(str, dst, URI_FALSE, URI_FALSE))
+	{
+		free(dst);
+		return NULL;
+	}
+	return dst;
+}
+
+#else
 static const char rfc3986[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -76,9 +111,6 @@ static char unescape(const char* what, size_t* px)
 		*px += 2;
 		return 16 * hex2bin(what[1]) + hex2bin(what[2]);
 	}
-
-	if (*what == '+')
-		return ' ';
 
 	return *what;
 }
@@ -124,6 +156,7 @@ char* winpr_str_url_encode(const char* str, size_t len)
 	}
 	return dst;
 }
+#endif
 
 BOOL winpr_str_append(const char* what, char* buffer, size_t size, const char* separator)
 {
@@ -143,16 +176,25 @@ BOOL winpr_str_append(const char* what, char* buffer, size_t size, const char* s
 }
 
 WINPR_ATTR_FORMAT_ARG(3, 4)
-int winpr_asprintf(char** s, size_t* slen, const char* templ, ...)
+int winpr_asprintf(char** s, size_t* slen, WINPR_FORMAT_ARG const char* templ, ...)
 {
 	va_list ap;
 
-	WINPR_ASSERT(s);
-	WINPR_ASSERT(slen);
+	va_start(ap, templ);
+	int rc = winpr_vasprintf(s, slen, templ, ap);
+	va_end(ap);
+	return rc;
+}
+
+WINPR_ATTR_FORMAT_ARG(3, 0)
+int winpr_vasprintf(char** s, size_t* slen, WINPR_FORMAT_ARG const char* templ, va_list oap)
+{
+	va_list ap;
+
 	*s = NULL;
 	*slen = 0;
 
-	va_start(ap, templ);
+	va_copy(ap, oap);
 	const int length = vsnprintf(NULL, 0, templ, ap);
 	va_end(ap);
 	if (length < 0)
@@ -162,7 +204,7 @@ int winpr_asprintf(char** s, size_t* slen, const char* templ, ...)
 	if (!str)
 		return -1;
 
-	va_start(ap, templ);
+	va_copy(ap, oap);
 	const int plen = vsprintf(str, templ, ap);
 	va_end(ap);
 
@@ -791,3 +833,11 @@ char* strndup(const char* src, size_t n)
 	return dst;
 }
 #endif
+
+const WCHAR* InitializeConstWCharFromUtf8(const char* str, WCHAR* buffer, size_t len)
+{
+	WINPR_ASSERT(str);
+	WINPR_ASSERT(buffer || (len == 0));
+	ConvertUtf8ToWChar(str, buffer, len);
+	return buffer;
+}

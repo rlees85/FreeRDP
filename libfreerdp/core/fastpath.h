@@ -91,7 +91,9 @@ enum FASTPATH_INPUT_EVENT_CODE
 	FASTPATH_INPUT_EVENT_MOUSE = 0x1,
 	FASTPATH_INPUT_EVENT_MOUSEX = 0x2,
 	FASTPATH_INPUT_EVENT_SYNC = 0x3,
-	FASTPATH_INPUT_EVENT_UNICODE = 0x4
+	FASTPATH_INPUT_EVENT_UNICODE = 0x4,
+	TS_FP_RELPOINTER_EVENT = 0x5,
+	TS_FP_QOETIMESTAMP_EVENT = 0x6
 };
 
 /* FastPath Keyboard Event Flags */
@@ -125,8 +127,8 @@ typedef struct
 } FASTPATH_UPDATE_HEADER;
 
 FREERDP_LOCAL BOOL fastpath_read_header_rdp(rdpFastPath* fastpath, wStream* s, UINT16* length);
-FREERDP_LOCAL int fastpath_recv_updates(rdpFastPath* fastpath, wStream* s);
-FREERDP_LOCAL int fastpath_recv_inputs(rdpFastPath* fastpath, wStream* s);
+FREERDP_LOCAL state_run_t fastpath_recv_updates(rdpFastPath* fastpath, wStream* s);
+FREERDP_LOCAL state_run_t fastpath_recv_inputs(rdpFastPath* fastpath, wStream* s);
 
 FREERDP_LOCAL BOOL fastpath_decrypt(rdpFastPath* fastpath, wStream* s, UINT16* length);
 

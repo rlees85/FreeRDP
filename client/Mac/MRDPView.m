@@ -92,10 +92,12 @@ static DWORD WINAPI mac_client_thread(void *param);
 	NSScreen *screen = [[NSScreen screens] objectAtIndex:0];
 	NSRect screenFrame = [screen frame];
 
-	if (settings->Fullscreen)
+	if (freerdp_settings_get_bool(settings, FreeRDP_Fullscreen))
 	{
-		settings->DesktopWidth = screenFrame.size.width;
-		settings->DesktopHeight = screenFrame.size.height;
+		if (!freerdp_settings_set_uint32(settings, FreeRDP_DesktopWidth, screenFrame.size.width))
+			return -1;
+		if (!freerdp_settings_set_uint32(settings, FreeRDP_DesktopHeight, screenFrame.size.height))
+			return -1;
 		[self enterFullScreenMode:[NSScreen mainScreen] withOptions:nil];
 	}
 	else
@@ -103,8 +105,8 @@ static DWORD WINAPI mac_client_thread(void *param);
 		[self exitFullScreenModeWithOptions:nil];
 	}
 
-	mfc->client_height = settings->DesktopHeight;
-	mfc->client_width = settings->DesktopWidth;
+	mfc->client_height = freerdp_settings_get_uint32(settings, FreeRDP_DesktopHeight);
+	mfc->client_width = freerdp_settings_get_uint32(settings, FreeRDP_DesktopWidth);
 
 	if (!(mfc->common.thread =
 	          CreateThread(NULL, 0, mac_client_thread, (void *)context, 0, &mfc->mainThreadId)))
@@ -719,10 +721,10 @@ DWORD fixKeyCode(DWORD keyCode, unichar keyChar, enum APPLE_KEYBOARD_TYPE type)
 
 			formatString = [[NSString alloc] initWithData:formatData encoding:NSUTF8StringEncoding];
 
-			const char *data = [formatString UTF8String];
-			const size_t size = strlen(data) + 1;
+			const char *data = [formatString cStringUsingEncoding:NSUTF8StringEncoding];
+			const size_t dataLen = [formatString lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
 			formatId = ClipboardRegisterFormat(mfc->clipboard, "text/plain");
-			ClipboardSetData(mfc->clipboard, formatId, data, size);
+			ClipboardSetData(mfc->clipboard, formatId, data, dataLen + 1);
 			[formatString release];
 
 			formatMatch = TRUE;
@@ -849,14 +851,16 @@ BOOL mac_pre_connect(freerdp *instance)
 	settings = instance->context->settings;
 	WINPR_ASSERT(settings);
 
-	if (!settings->ServerHostname)
+	if (!freerdp_settings_get_string(settings, FreeRDP_ServerHostname))
 	{
 		WLog_ERR(TAG, "error: server hostname was not specified with /v:<server>[:port]");
 		return FALSE;
 	}
 
-	settings->OsMajorType = OSMAJORTYPE_MACINTOSH;
-	settings->OsMinorType = OSMINORTYPE_MACINTOSH;
+	if (!freerdp_settings_set_uint32(settings, FreeRDP_OsMajorType, OSMAJORTYPE_MACINTOSH))
+		return FALSE;
+	if (!freerdp_settings_set_uint32(settings, FreeRDP_OsMinorType, OSMINORTYPE_MACINTOSH))
+		return FALSE;
 	PubSub_SubscribeChannelConnected(instance->context->pubSub, mac_OnChannelConnectedEventHandler);
 	PubSub_SubscribeChannelDisconnected(instance->context->pubSub,
 	                                    mac_OnChannelDisconnectedEventHandler);
@@ -946,6 +950,13 @@ static BOOL mac_show_auth_dialog(MRDPView *view, NSString *title, char **usernam
 	if (*domain)
 		dialog.domain = [NSString stringWithCString:*domain encoding:NSUTF8StringEncoding];
 
+	free(*username);
+	free(*password);
+	free(*domain);
+	*username = NULL;
+	*password = NULL;
+	*domain = NULL;
+
 	dispatch_sync(dispatch_get_main_queue(), ^{
 		[dialog performSelectorOnMainThread:@selector(runModal:)
 		                         withObject:[view window]
@@ -955,31 +966,33 @@ static BOOL mac_show_auth_dialog(MRDPView *view, NSString *title, char **usernam
 
 	if (ok)
 	{
-		size_t ulen, plen, dlen;
 		const char *submittedUsername = [dialog.username cStringUsingEncoding:NSUTF8StringEncoding];
-		ulen = (strlen(submittedUsername) + 1) * sizeof(char);
-		*username = malloc(ulen);
+		const size_t submittedUsernameLen =
+		    [dialog.username lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+		if (submittedUsername && (submittedUsernameLen > 0))
+			*username = strndup(submittedUsername, submittedUsernameLen);
 
 		if (!(*username))
 			return FALSE;
 
-		sprintf_s(*username, ulen, "%s", submittedUsername);
 		const char *submittedPassword = [dialog.password cStringUsingEncoding:NSUTF8StringEncoding];
-		plen = (strlen(submittedPassword) + 1) * sizeof(char);
-		*password = malloc(plen);
+		const size_t submittedPasswordLen =
+		    [dialog.password lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+		if (submittedPassword && (submittedPasswordLen > 0))
+			*password = strndup(submittedPassword, submittedPasswordLen);
 
 		if (!(*password))
 			return FALSE;
 
-		sprintf_s(*password, plen, "%s", submittedPassword);
 		const char *submittedDomain = [dialog.domain cStringUsingEncoding:NSUTF8StringEncoding];
-		dlen = (strlen(submittedDomain) + 1) * sizeof(char);
-		*domain = malloc(dlen);
-
-		if (!(*domain))
-			return FALSE;
-
-		sprintf_s(*domain, dlen, "%s", submittedDomain);
+		const size_t submittedDomainLen =
+		    [dialog.domain lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+		if (submittedDomain && (submittedDomainLen > 0))
+		{
+			*domain = strndup(submittedDomain, submittedDomainLen);
+			if (!(*domain))
+				return FALSE;
+		}
 	}
 
 	return ok;
@@ -1003,26 +1016,32 @@ static BOOL mac_authenticate_raw(freerdp *instance, char **username, char **pass
 	{
 		case AUTH_SMARTCARD_PIN:
 			pinOnly = TRUE;
-			title = [NSString stringWithFormat:@"%@:%u",
-			                                   [NSString stringWithCString:settings->ServerHostname
-			                                                      encoding:NSUTF8StringEncoding],
-			                                   settings -> ServerPort];
+			title = [NSString
+			    stringWithFormat:@"%@:%u",
+			                     [NSString stringWithCString:freerdp_settings_get_string(
+			                                                     settings, FreeRDP_ServerHostname)
+			                                        encoding:NSUTF8StringEncoding],
+			                     freerdp_settings_get_uint32(settings, FreeRDP_ServerPort)];
 			break;
 		case AUTH_TLS:
 		case AUTH_RDP:
 		case AUTH_NLA:
-			title = [NSString stringWithFormat:@"%@:%u",
-			                                   [NSString stringWithCString:settings->ServerHostname
-			                                                      encoding:NSUTF8StringEncoding],
-			                                   settings -> ServerPort];
+			title = [NSString
+			    stringWithFormat:@"%@:%u",
+			                     [NSString stringWithCString:freerdp_settings_get_string(
+			                                                     settings, FreeRDP_ServerHostname)
+			                                        encoding:NSUTF8StringEncoding],
+			                     freerdp_settings_get_uint32(settings, FreeRDP_ServerPort)];
 			break;
 		case GW_AUTH_HTTP:
 		case GW_AUTH_RDG:
 		case GW_AUTH_RPC:
-			title = [NSString stringWithFormat:@"%@:%u",
-			                                   [NSString stringWithCString:settings->GatewayHostname
-			                                                      encoding:NSUTF8StringEncoding],
-			                                   settings -> GatewayPort];
+			title = [NSString
+			    stringWithFormat:@"%@:%u",
+			                     [NSString stringWithCString:freerdp_settings_get_string(
+			                                                     settings, FreeRDP_GatewayHostname)
+			                                        encoding:NSUTF8StringEncoding],
+			                     freerdp_settings_get_uint32(settings, FreeRDP_GatewayPort)];
 			break;
 		default:
 			return FALSE;
@@ -1359,8 +1378,8 @@ BOOL mac_end_paint(rdpContext *context)
 
 	ww = mfc->client_width;
 	wh = mfc->client_height;
-	dw = mfc->common.context.settings->DesktopWidth;
-	dh = mfc->common.context.settings->DesktopHeight;
+	dw = freerdp_settings_get_uint32(mfc->common.context.settings, FreeRDP_DesktopWidth);
+	dh = freerdp_settings_get_uint32(mfc->common.context.settings, FreeRDP_DesktopHeight);
 
 	if ((!context) || (!context->gdi))
 		return FALSE;
@@ -1374,7 +1393,8 @@ BOOL mac_end_paint(rdpContext *context)
 	newDrawRect.size.width = invalid->w;
 	newDrawRect.size.height = invalid->h;
 
-	if (mfc->common.context.settings->SmartSizing && (ww != dw || wh != dh))
+	if (freerdp_settings_get_bool(mfc->common.context.settings, FreeRDP_SmartSizing) &&
+	    (ww != dw || wh != dh))
 	{
 		newDrawRect.origin.y = newDrawRect.origin.y * wh / dh - 1;
 		newDrawRect.size.height = newDrawRect.size.height * wh / dh + 1;
@@ -1415,8 +1435,8 @@ BOOL mac_desktop_resize(rdpContext *context)
 	CGContextRef old_context = view->bitmap_context;
 	view->bitmap_context = NULL;
 	CGContextRelease(old_context);
-	mfc->width = settings->DesktopWidth;
-	mfc->height = settings->DesktopHeight;
+	mfc->width = freerdp_settings_get_uint32(settings, FreeRDP_DesktopWidth);
+	mfc->height = freerdp_settings_get_uint32(settings, FreeRDP_DesktopHeight);
 
 	if (!gdi_resize(context->gdi, mfc->width, mfc->height))
 		return FALSE;
@@ -1430,8 +1450,8 @@ BOOL mac_desktop_resize(rdpContext *context)
 	mfc->client_height = mfc->height;
 	[view setFrameSize:NSMakeSize(mfc->width, mfc->height)];
 	EventArgsInit(&e, "mfreerdp");
-	e.width = settings->DesktopWidth;
-	e.height = settings->DesktopHeight;
+	e.width = freerdp_settings_get_uint32(settings, FreeRDP_DesktopWidth);
+	e.height = freerdp_settings_get_uint32(settings, FreeRDP_DesktopHeight);
 	PubSub_OnResizeWindow(context->pubSub, context, &e);
 	return TRUE;
 }

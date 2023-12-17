@@ -136,6 +136,9 @@ static enum AVCodecID ffmpeg_get_avcodec(const AUDIO_FORMAT* format)
 		case WAVE_FORMAT_AAC_MS:
 			return AV_CODEC_ID_AAC;
 
+		case WAVE_FORMAT_OPUS:
+			return AV_CODEC_ID_OPUS;
+
 		default:
 			return AV_CODEC_ID_NONE;
 	}
@@ -165,6 +168,9 @@ static int ffmpeg_sample_format(const AUDIO_FORMAT* format)
 		case WAVE_FORMAT_MPEGLAYER3:
 		case WAVE_FORMAT_AAC_MS:
 			return AV_SAMPLE_FMT_FLTP;
+
+		case WAVE_FORMAT_OPUS:
+			return AV_SAMPLE_FMT_S16;
 
 		case WAVE_FORMAT_MSG723:
 		case WAVE_FORMAT_GSM610:
@@ -430,9 +436,35 @@ static BOOL ffmpeg_resample_frame(AVAudioResampleContext* context, AVFrame* in, 
 static BOOL ffmpeg_encode_frame(AVCodecContext* context, AVFrame* in, AVPacket* packet,
                                 wStream* out)
 {
-	int ret;
+	if (in->format == AV_SAMPLE_FMT_FLTP)
+	{
+		uint8_t** pp = in->extended_data;
+#if LIBAVUTIL_VERSION_INT < AV_VERSION_INT(57, 28, 100)
+		const int nr_channels = in->channels;
+#else
+		const int nr_channels = in->ch_layout.nb_channels;
+#endif
+
+		for (int y = 0; y < nr_channels; y++)
+		{
+			float* data = (float*)pp[y];
+			for (int x = 0; x < in->nb_samples; x++)
+			{
+				const float val1 = data[x];
+				if (isnan(val1))
+					data[x] = 0.0f;
+				else if (isinf(val1))
+				{
+					if (val1 < 0.0f)
+						data[x] = -1.0f;
+					else
+						data[x] = 1.0f;
+				}
+			}
+		}
+	}
 	/* send the packet with the compressed data to the encoder */
-	ret = avcodec_send_frame(context, in);
+	int ret = avcodec_send_frame(context, in);
 
 	if (ret < 0)
 	{

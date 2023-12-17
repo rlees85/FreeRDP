@@ -64,7 +64,7 @@ static __inline void __attribute__((ATTRIBUTES)) _mm_prefetch_buffer(char* buffe
 /* rfx_encode_rgb_to_ycbcr_sse2 code now resides in the primitives library. */
 
 static __inline void __attribute__((ATTRIBUTES))
-rfx_quantization_decode_block_sse2(INT16* buffer, const int buffer_size, const UINT32 factor)
+rfx_quantization_decode_block_sse2(INT16* buffer, const size_t buffer_size, const UINT32 factor)
 {
 	__m128i a;
 	__m128i* ptr = (__m128i*)buffer;
@@ -82,8 +82,7 @@ rfx_quantization_decode_block_sse2(INT16* buffer, const int buffer_size, const U
 	} while (ptr < buf_end);
 }
 
-static void rfx_quantization_decode_sse2(INT16* WINPR_RESTRICT buffer,
-                                         const UINT32* WINPR_RESTRICT quantVals)
+static void rfx_quantization_decode_sse2(INT16* buffer, const UINT32* WINPR_RESTRICT quantVals)
 {
 	WINPR_ASSERT(buffer);
 	WINPR_ASSERT(quantVals);
@@ -124,7 +123,7 @@ rfx_quantization_encode_block_sse2(INT16* buffer, const int buffer_size, const U
 	} while (ptr < buf_end);
 }
 
-static void rfx_quantization_encode_sse2(INT16* WINPR_RESTRICT buffer,
+static void rfx_quantization_encode_sse2(INT16* buffer,
                                          const UINT32* WINPR_RESTRICT quantization_values)
 {
 	WINPR_ASSERT(buffer);
@@ -320,7 +319,7 @@ rfx_dwt_2d_decode_block_sse2(INT16* buffer, INT16* idwt, int subband_width)
 	rfx_dwt_2d_decode_block_vert_sse2(l_dst, h_dst, buffer, subband_width);
 }
 
-static void rfx_dwt_2d_decode_sse2(INT16* WINPR_RESTRICT buffer, INT16* WINPR_RESTRICT dwt_buffer)
+static void rfx_dwt_2d_decode_sse2(INT16* buffer, INT16* dwt_buffer)
 {
 	WINPR_ASSERT(buffer);
 	WINPR_ASSERT(dwt_buffer);
@@ -456,7 +455,7 @@ rfx_dwt_2d_encode_block_sse2(INT16* buffer, INT16* dwt, int subband_width)
 	rfx_dwt_2d_encode_block_horiz_sse2(h_src, lh, hh, subband_width);
 }
 
-static void rfx_dwt_2d_encode_sse2(INT16* WINPR_RESTRICT buffer, INT16* WINPR_RESTRICT dwt_buffer)
+static void rfx_dwt_2d_encode_sse2(INT16* buffer, INT16* dwt_buffer)
 {
 	WINPR_ASSERT(buffer);
 	WINPR_ASSERT(dwt_buffer);

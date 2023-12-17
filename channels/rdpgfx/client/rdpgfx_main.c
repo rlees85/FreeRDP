@@ -376,6 +376,7 @@ static UINT rdpgfx_recv_caps_confirm_pdu(GENERIC_CHANNEL_CALLBACK* callback, wSt
 	Stream_Read_UINT32(s, capsSet.version); /* version (4 bytes) */
 	Stream_Read_UINT32(s, capsSet.length);  /* capsDataLength (4 bytes) */
 	Stream_Read_UINT32(s, capsSet.flags);   /* capsData (4 bytes) */
+	gfx->TotalDecodedFrames = 0;
 	gfx->ConnectionCaps = capsSet;
 	DEBUG_RDPGFX(gfx->log, "RecvCapsConfirmPdu: version: 0x%08" PRIX32 " flags: 0x%08" PRIX32 "",
 	             capsSet.version, capsSet.flags);
@@ -640,7 +641,9 @@ static UINT rdpgfx_load_cache_import_offer(RDPGFX_PLUGIN* gfx, RDPGFX_CACHE_IMPO
 	if (!freerdp_settings_get_bool(settings, FreeRDP_BitmapCachePersistEnabled))
 		return CHANNEL_RC_OK;
 
-	if (!settings->BitmapCachePersistFile)
+	const char* BitmapCachePersistFile =
+	    freerdp_settings_get_string(settings, FreeRDP_BitmapCachePersistFile);
+	if (!BitmapCachePersistFile)
 		return CHANNEL_RC_OK;
 
 	persistent = persistent_cache_new();
@@ -648,7 +651,7 @@ static UINT rdpgfx_load_cache_import_offer(RDPGFX_PLUGIN* gfx, RDPGFX_CACHE_IMPO
 	if (!persistent)
 		return CHANNEL_RC_NO_MEMORY;
 
-	if (persistent_cache_open(persistent, settings->BitmapCachePersistFile, FALSE, 3) < 1)
+	if (persistent_cache_open(persistent, BitmapCachePersistFile, FALSE, 3) < 1)
 	{
 		error = CHANNEL_RC_INITIALIZATION_ERROR;
 		goto fail;
@@ -718,7 +721,9 @@ static UINT rdpgfx_save_persistent_cache(RDPGFX_PLUGIN* gfx)
 	if (!freerdp_settings_get_bool(settings, FreeRDP_BitmapCachePersistEnabled))
 		return CHANNEL_RC_OK;
 
-	if (!settings->BitmapCachePersistFile)
+	const char* BitmapCachePersistFile =
+	    freerdp_settings_get_string(settings, FreeRDP_BitmapCachePersistFile);
+	if (!BitmapCachePersistFile)
 		return CHANNEL_RC_OK;
 
 	if (!context->ExportCacheEntry)
@@ -729,7 +734,7 @@ static UINT rdpgfx_save_persistent_cache(RDPGFX_PLUGIN* gfx)
 	if (!persistent)
 		return CHANNEL_RC_NO_MEMORY;
 
-	if (persistent_cache_open(persistent, settings->BitmapCachePersistFile, TRUE, 3) < 1)
+	if (persistent_cache_open(persistent, BitmapCachePersistFile, TRUE, 3) < 1)
 	{
 		error = CHANNEL_RC_INITIALIZATION_ERROR;
 		goto fail;
@@ -848,7 +853,9 @@ static UINT rdpgfx_send_cache_offer(RDPGFX_PLUGIN* gfx)
 	if (!freerdp_settings_get_bool(settings, FreeRDP_BitmapCachePersistEnabled))
 		return CHANNEL_RC_OK;
 
-	if (!settings->BitmapCachePersistFile)
+	const char* BitmapCachePersistFile =
+	    freerdp_settings_get_string(settings, FreeRDP_BitmapCachePersistFile);
+	if (!BitmapCachePersistFile)
 		return CHANNEL_RC_OK;
 
 	persistent = persistent_cache_new();
@@ -856,7 +863,7 @@ static UINT rdpgfx_send_cache_offer(RDPGFX_PLUGIN* gfx)
 	if (!persistent)
 		return CHANNEL_RC_NO_MEMORY;
 
-	if (persistent_cache_open(persistent, settings->BitmapCachePersistFile, FALSE, 3) < 1)
+	if (persistent_cache_open(persistent, BitmapCachePersistFile, FALSE, 3) < 1)
 	{
 		error = CHANNEL_RC_INITIALIZATION_ERROR;
 		goto fail;
@@ -933,7 +940,9 @@ static UINT rdpgfx_load_cache_import_reply(RDPGFX_PLUGIN* gfx, RDPGFX_CACHE_IMPO
 	if (!freerdp_settings_get_bool(settings, FreeRDP_BitmapCachePersistEnabled))
 		return CHANNEL_RC_OK;
 
-	if (!settings->BitmapCachePersistFile)
+	const char* BitmapCachePersistFile =
+	    freerdp_settings_get_string(settings, FreeRDP_BitmapCachePersistFile);
+	if (!BitmapCachePersistFile)
 		return CHANNEL_RC_OK;
 
 	persistent = persistent_cache_new();
@@ -941,7 +950,7 @@ static UINT rdpgfx_load_cache_import_reply(RDPGFX_PLUGIN* gfx, RDPGFX_CACHE_IMPO
 	if (!persistent)
 		return CHANNEL_RC_NO_MEMORY;
 
-	if (persistent_cache_open(persistent, settings->BitmapCachePersistFile, FALSE, 3) < 1)
+	if (persistent_cache_open(persistent, BitmapCachePersistFile, FALSE, 3) < 1)
 	{
 		error = CHANNEL_RC_INITIALIZATION_ERROR;
 		goto fail;
@@ -2396,7 +2405,8 @@ void rdpgfx_client_context_free(RdpgfxClientContext* context)
 }
 
 static const IWTSVirtualChannelCallback rdpgfx_callbacks = { rdpgfx_on_data_received,
-	                                                         rdpgfx_on_open, rdpgfx_on_close };
+	                                                         rdpgfx_on_open, rdpgfx_on_close,
+	                                                         NULL };
 
 /**
  * Function description

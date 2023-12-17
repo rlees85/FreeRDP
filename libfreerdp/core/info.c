@@ -21,6 +21,8 @@
 
 #include <freerdp/config.h>
 
+#include "settings.h"
+
 #include <winpr/crt.h>
 #include <winpr/assert.h>
 
@@ -73,12 +75,11 @@ static const struct info_flags_t info_flags[] = {
 	{ INFO_HIDEF_RAIL_SUPPORTED, "INFO_HIDEF_RAIL_SUPPORTED" },
 };
 
-static BOOL rdp_read_info_null_string(rdpSettings* settings, size_t id, const char* what,
-                                      UINT32 flags, wStream* s, size_t cbLen, size_t max,
-                                      BOOL isNullTerminated)
+static BOOL rdp_read_info_null_string(rdpSettings* settings, FreeRDP_Settings_Keys_String id,
+                                      const char* what, UINT32 flags, wStream* s, size_t cbLen,
+                                      size_t max)
 {
 	const BOOL unicode = (flags & INFO_UNICODE) ? TRUE : FALSE;
-	const size_t nullSize = unicode ? sizeof(WCHAR) : sizeof(CHAR);
 
 	if (!freerdp_settings_set_string(settings, id, NULL))
 		return FALSE;
@@ -88,9 +89,6 @@ static BOOL rdp_read_info_null_string(rdpSettings* settings, size_t id, const ch
 
 	if (cbLen > 0)
 	{
-		if (isNullTerminated && (max > 0))
-			max -= nullSize;
-
 		if ((cbLen > max) || (unicode && ((cbLen % 2) != 0)))
 		{
 			WLog_ERR(TAG, "protocol error: %s has invalid value: %" PRIuz "", what, cbLen);
@@ -332,7 +330,7 @@ static BOOL rdp_read_extended_info_packet(rdpRdp* rdp, wStream* s)
 	settings->IPv6Enabled = (clientAddressFamily == ADDRESS_FAMILY_INET6 ? TRUE : FALSE);
 
 	if (!rdp_read_info_null_string(settings, FreeRDP_ClientAddress, "cbClientAddress", INFO_UNICODE,
-	                               s, cbClientAddress, rdp_get_client_address_max_size(rdp), TRUE))
+	                               s, cbClientAddress, rdp_get_client_address_max_size(rdp)))
 		return FALSE;
 
 	if (!Stream_CheckAndLogRequiredLength(TAG, s, 2))
@@ -349,7 +347,7 @@ static BOOL rdp_read_extended_info_packet(rdpRdp* rdp, wStream* s)
 	 */
 
 	if (!rdp_read_info_null_string(settings, FreeRDP_ClientDir, "cbClientDir", INFO_UNICODE, s,
-	                               cbClientDir, 512, TRUE))
+	                               cbClientDir, 512))
 		return FALSE;
 
 	/**
@@ -424,7 +422,7 @@ static BOOL rdp_read_extended_info_packet(rdpRdp* rdp, wStream* s)
 
 		if (!rdp_read_info_null_string(settings, FreeRDP_DynamicDSTTimeZoneKeyName,
 		                               "cbDynamicDSTTimeZoneKeyName", INFO_UNICODE, s,
-		                               cbDynamicDSTTimeZoneKeyName, 254, FALSE))
+		                               cbDynamicDSTTimeZoneKeyName, 254))
 			return FALSE;
 
 		if (Stream_GetRemainingLength(s) == 0)
@@ -575,7 +573,7 @@ static BOOL rdp_write_extended_info_packet(rdpRdp* rdp, wStream* s)
 		const char* tz = freerdp_settings_get_string(settings, FreeRDP_DynamicDSTTimeZoneKeyName);
 		if (tz)
 			rlen = strnlen(tz, 254);
-		Stream_Write_UINT16(s, (UINT16)rlen);
+		Stream_Write_UINT16(s, (UINT16)rlen * sizeof(WCHAR));
 		if (Stream_Write_UTF16_String_From_UTF8(s, rlen, tz, rlen, FALSE) < 0)
 			goto fail;
 		Stream_Write_UINT16(s, settings->DynamicDaylightTimeDisabled ? 0x01 : 0x00);
@@ -588,8 +586,8 @@ fail:
 	return ret;
 }
 
-static BOOL rdp_read_info_string(rdpSettings* settings, size_t id, UINT32 flags, wStream* s,
-                                 size_t cbLenNonNull, size_t max)
+static BOOL rdp_read_info_string(rdpSettings* settings, FreeRDP_Settings_Keys_String id,
+                                 UINT32 flags, wStream* s, size_t cbLenNonNull, size_t max)
 {
 	union
 	{
@@ -894,7 +892,7 @@ static BOOL rdp_write_info_packet(rdpRdp* rdp, wStream* s)
 		cbAlternateShell = (UINT16)cbAlternateShell * sizeof(WCHAR);
 	}
 
-	size_t inputId = FreeRDP_RemoteAssistanceSessionId;
+	FreeRDP_Settings_Keys_String inputId = FreeRDP_RemoteAssistanceSessionId;
 	if (!freerdp_settings_get_bool(settings, FreeRDP_RemoteAssistanceMode))
 		inputId = FreeRDP_ShellWorkingDirectory;
 

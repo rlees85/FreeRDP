@@ -131,8 +131,8 @@ static void set_stream_id_for_buffer(struct libusb_transfer* transfer, UINT32 st
 }
 
 WINPR_ATTR_FORMAT_ARG(3, 8)
-static BOOL log_libusb_result_(wLog* log, DWORD lvl, const char* fmt, const char* fkt,
-                               const char* file, size_t line, int error, ...)
+static BOOL log_libusb_result_(wLog* log, DWORD lvl, WINPR_FORMAT_ARG const char* fmt,
+                               const char* fkt, const char* file, size_t line, int error, ...)
 {
 	WINPR_UNUSED(file);
 
@@ -1270,7 +1270,7 @@ static int libusb_udev_isoch_transfer(IUDEVICE* idev, GENERIC_CHANNEL_CALLBACK* 
 		return -1;
 	}
 	rc = libusb_submit_transfer(iso_transfer);
-	if (log_libusb_result(urbdrc->log, WLOG_ERROR, "", rc))
+	if (log_libusb_result(urbdrc->log, WLOG_ERROR, "libusb_submit_transfer", rc))
 		return -1;
 	return rc;
 }
@@ -1388,7 +1388,7 @@ static int libusb_udev_bulk_or_interrupt_transfer(IUDEVICE* idev,
 		return -1;
 	}
 	rc = libusb_submit_transfer(transfer);
-	if (log_libusb_result(urbdrc->log, WLOG_ERROR, "", rc))
+	if (log_libusb_result(urbdrc->log, WLOG_ERROR, "libusb_submit_transfer", rc))
 		return -1;
 	return rc;
 }

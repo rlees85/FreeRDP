@@ -59,20 +59,8 @@
 #endif
 
 #ifdef WITH_AAD
-#include <cjson/cJSON.h>
 #include <freerdp/utils/http.h>
-
-#if CJSON_VERSION_MAJOR == 1
-#if CJSON_VERSION_MINOR <= 7
-#if CJSON_VERSION_PATCH < 13
-#define USE_CJSON_COMPAT
-#endif
-#endif
-#endif
-
-#if defined(USE_CJSON_COMPAT)
-extern cJSON* cJSON_ParseWithLength(const char* value, size_t buffer_length);
-#endif
+#include <freerdp/utils/aad.h>
 #endif
 
 #include <freerdp/log.h>
@@ -88,6 +76,7 @@ static void set_default_callbacks(freerdp* instance)
 	instance->PresentGatewayMessage = client_cli_present_gateway_message;
 	instance->LogonErrorInfo = client_cli_logon_error_info;
 	instance->GetAccessToken = client_cli_get_access_token;
+	instance->RetryDialog = client_common_retry_dialog;
 }
 
 static BOOL freerdp_client_common_new(freerdp* instance, rdpContext* context)
@@ -230,20 +219,21 @@ static BOOL freerdp_client_settings_post_process(rdpSettings* settings)
 {
 	/* Moved GatewayUseSameCredentials logic outside of cmdline.c, so
 	 * that the rdp file also triggers this functionality */
-	if (settings->GatewayEnabled)
+	if (freerdp_settings_get_bool(settings, FreeRDP_GatewayEnabled))
 	{
-		if (settings->GatewayUseSameCredentials)
+		if (freerdp_settings_get_bool(settings, FreeRDP_GatewayUseSameCredentials))
 		{
-			if (settings->Username)
+			const char* Username = freerdp_settings_get_string(settings, FreeRDP_Username);
+			const char* Domain = freerdp_settings_get_string(settings, FreeRDP_Domain);
+			if (Username)
 			{
-				if (!freerdp_settings_set_string(settings, FreeRDP_GatewayUsername,
-				                                 settings->Username))
+				if (!freerdp_settings_set_string(settings, FreeRDP_GatewayUsername, Username))
 					goto out_error;
 			}
 
-			if (settings->Domain)
+			if (Domain)
 			{
-				if (!freerdp_settings_set_string(settings, FreeRDP_GatewayDomain, settings->Domain))
+				if (!freerdp_settings_set_string(settings, FreeRDP_GatewayDomain, Domain))
 					goto out_error;
 			}
 
@@ -259,30 +249,27 @@ static BOOL freerdp_client_settings_post_process(rdpSettings* settings)
 
 	/* Moved logic for Multimon and Span monitors to force fullscreen, so
 	 * that the rdp file also triggers this functionality */
-	if (settings->SpanMonitors)
+	if (freerdp_settings_get_bool(settings, FreeRDP_SpanMonitors))
 	{
-		settings->UseMultimon = TRUE;
-		settings->Fullscreen = TRUE;
+		freerdp_settings_set_bool(settings, FreeRDP_UseMultimon, TRUE);
+		freerdp_settings_set_bool(settings, FreeRDP_Fullscreen, TRUE);
 	}
-	else if (settings->UseMultimon)
+	else if (freerdp_settings_get_bool(settings, FreeRDP_UseMultimon))
 	{
-		settings->Fullscreen = TRUE;
+		freerdp_settings_set_bool(settings, FreeRDP_Fullscreen, TRUE);
 	}
 
 	/* deal with the smartcard / smartcard logon stuff */
-	if (settings->SmartcardLogon)
+	if (freerdp_settings_get_bool(settings, FreeRDP_SmartcardLogon))
 	{
-		settings->TlsSecurity = TRUE;
-		settings->RedirectSmartCards = TRUE;
-		settings->DeviceRedirection = TRUE;
+		freerdp_settings_set_bool(settings, FreeRDP_TlsSecurity, TRUE);
+		freerdp_settings_set_bool(settings, FreeRDP_RedirectSmartCards, TRUE);
+		freerdp_settings_set_bool(settings, FreeRDP_DeviceRedirection, TRUE);
 		freerdp_settings_set_bool(settings, FreeRDP_PasswordIsSmartcardPin, TRUE);
 	}
 
 	return TRUE;
 out_error:
-	free(settings->GatewayUsername);
-	free(settings->GatewayDomain);
-	free(settings->GatewayPassword);
 	return FALSE;
 }
 
@@ -512,8 +499,10 @@ static BOOL client_cli_authenticate_raw(freerdp* instance, rdp_auth_reason reaso
 		if (!*password)
 			goto fail;
 
+		const BOOL fromStdin =
+		    freerdp_settings_get_bool(instance->context->settings, FreeRDP_CredentialsFromStdin);
 		if (freerdp_passphrase_read(instance->context, prompt[2], *password, password_size,
-		                            instance->context->settings->CredentialsFromStdin) == NULL)
+		                            fromStdin) == NULL)
 			goto fail;
 	}
 
@@ -605,7 +594,7 @@ BOOL client_cli_choose_smartcard(freerdp* instance, SmartcardCertInfo** cert_lis
 #if defined(WITH_FREERDP_DEPRECATED)
 BOOL client_cli_authenticate(freerdp* instance, char** username, char** password, char** domain)
 {
-	if (instance->settings->SmartcardLogon)
+	if (freerdp_settings_get_bool(instance->settings, FreeRDP_SmartcardLogon))
 	{
 		WLog_INFO(TAG, "Authentication via smartcard");
 		return TRUE;
@@ -630,7 +619,9 @@ static DWORD client_cli_accept_certificate(freerdp* instance)
 	const rdpSettings* settings = instance->context->settings;
 	WINPR_ASSERT(settings);
 
-	if (settings->CredentialsFromStdin)
+	const BOOL fromStdin =
+	    freerdp_settings_get_bool(instance->context->settings, FreeRDP_CredentialsFromStdin);
+	if (fromStdin)
 		return 0;
 
 	while (1)
@@ -643,7 +634,7 @@ static DWORD client_cli_accept_certificate(freerdp* instance)
 		{
 			printf("\nError: Could not read answer from stdin.");
 
-			if (settings->CredentialsFromStdin)
+			if (fromStdin)
 				printf(" - Run without parameter \"--from-stdin\" to set trust.");
 
 			printf("\n");
@@ -1129,9 +1120,8 @@ BOOL client_common_get_access_token(freerdp* instance, const char* request, char
 	long resp_code = 0;
 	BYTE* response = NULL;
 	size_t response_length = 0;
-	cJSON* json = NULL;
-	cJSON* access_token_prop = NULL;
-	const char* access_token_str = NULL;
+
+	wLog* log = WLog_Get(TAG);
 
 	if (!freerdp_http_request("https://login.microsoftonline.com/common/oauth2/v2.0/token", request,
 	                          &resp_code, &response, &response_length))
@@ -1143,7 +1133,7 @@ BOOL client_common_get_access_token(freerdp* instance, const char* request, char
 	if (resp_code != HTTP_STATUS_OK)
 	{
 		char buffer[64] = { 0 };
-		wLog* log = WLog_Get(TAG);
+
 		WLog_Print(log, WLOG_ERROR,
 		           "Server unwilling to provide access token; returned status code %s",
 		           freerdp_http_status_string_format(resp_code, buffer, sizeof(buffer)));
@@ -1152,41 +1142,58 @@ BOOL client_common_get_access_token(freerdp* instance, const char* request, char
 		goto cleanup;
 	}
 
-	json = cJSON_ParseWithLength((const char*)response, response_length);
-	if (!json)
-	{
-		char buffer[64] = { 0 };
-		WLog_ERR(
-		    TAG, "Failed to parse access token response [got %" PRIuz " bytes, response code %s",
-		    response_length, freerdp_http_status_string_format(resp_code, buffer, sizeof(buffer)));
-		goto cleanup;
-	}
-
-	access_token_prop = cJSON_GetObjectItem(json, "access_token");
-	if (!access_token_prop)
-	{
-		WLog_ERR(TAG, "Response has no \"access_token\" property");
-		goto cleanup;
-	}
-
-	access_token_str = cJSON_GetStringValue(access_token_prop);
-	if (!access_token_str)
-	{
-		WLog_ERR(TAG, "Invalid value for \"access_token\"");
-		goto cleanup;
-	}
-
-	*token = _strdup(access_token_str);
+	*token = freerdp_utils_aad_get_access_token(log, (const char*)response, response_length);
 	if (*token)
 		ret = TRUE;
 
 cleanup:
-	cJSON_Delete(json);
 	free(response);
 	return ret;
 #else
 	return FALSE;
 #endif
+}
+
+SSIZE_T client_common_retry_dialog(freerdp* instance, const char* what, size_t current,
+                                   void* userarg)
+{
+	WINPR_UNUSED(instance);
+	WINPR_ASSERT(instance->context);
+	WINPR_UNUSED(userarg);
+	WINPR_ASSERT(instance);
+	WINPR_ASSERT(what);
+
+	if (strcmp(what, "arm-transport") != 0)
+	{
+		WLog_ERR(TAG, "Unknown module %s, aborting", what);
+		return -1;
+	}
+
+	if (current == 0)
+		WLog_INFO(TAG, "[%s] Starting your VM. It may take up to 5 minutes", what);
+
+	const rdpSettings* settings = instance->context->settings;
+	const BOOL enabled = freerdp_settings_get_bool(settings, FreeRDP_AutoReconnectionEnabled);
+	if (!enabled)
+	{
+		WLog_WARN(TAG, "Automatic reconnection disabled, terminating. Try to connect again later");
+		return -1;
+	}
+
+	const size_t max = freerdp_settings_get_uint32(settings, FreeRDP_AutoReconnectMaxRetries);
+	const size_t delay = freerdp_settings_get_uint32(settings, FreeRDP_TcpConnectTimeout);
+	if (current >= max)
+	{
+		WLog_ERR(TAG,
+		         "[%s] retries exceeded. Your VM failed to start. Try again later or contact your "
+		         "tech support for help if this keeps happening.",
+		         what);
+		return -1;
+	}
+
+	WLog_INFO(TAG, "[%s] retry %" PRIuz "/%" PRIuz ", delaying %" PRIuz "ms before next attempt",
+	          what, current, max, delay);
+	return delay;
 }
 
 BOOL client_auto_reconnect(freerdp* instance)
@@ -1198,7 +1205,6 @@ BOOL client_auto_reconnect_ex(freerdp* instance, BOOL (*window_events)(freerdp* 
 {
 	BOOL retry = TRUE;
 	UINT32 error;
-	UINT32 maxRetries;
 	UINT32 numRetries = 0;
 	rdpSettings* settings;
 
@@ -1210,7 +1216,8 @@ BOOL client_auto_reconnect_ex(freerdp* instance, BOOL (*window_events)(freerdp* 
 	settings = instance->context->settings;
 	WINPR_ASSERT(settings);
 
-	maxRetries = settings->AutoReconnectMaxRetries;
+	const UINT32 maxRetries =
+	    freerdp_settings_get_uint32(settings, FreeRDP_AutoReconnectMaxRetries);
 
 	/* Only auto reconnect on network disconnects. */
 	error = freerdp_error_info(instance);
@@ -1229,7 +1236,7 @@ BOOL client_auto_reconnect_ex(freerdp* instance, BOOL (*window_events)(freerdp* 
 			return FALSE;
 	}
 
-	if (!settings->AutoReconnectionEnabled)
+	if (!freerdp_settings_get_bool(settings, FreeRDP_AutoReconnectionEnabled))
 	{
 		/* No auto-reconnect - just quit */
 		return FALSE;
@@ -1495,6 +1502,8 @@ BOOL freerdp_client_send_wheel_event(rdpClientContext* cctx, UINT16 mflags)
 
 	WINPR_ASSERT(cctx);
 
+	if (!freerdp_settings_get_bool(cctx->context.settings, FreeRDP_HasRelativeMouseEvent))
+	{
 #if defined(CHANNEL_AINPUT_CLIENT)
 	if (cctx->ainput)
 	{
@@ -1528,6 +1537,7 @@ BOOL freerdp_client_send_wheel_event(rdpClientContext* cctx, UINT16 mflags)
 			handled = TRUE;
 	}
 #endif
+	}
 	if (!handled)
 		freerdp_input_send_mouse_event(cctx->context.input, mflags, 0, 0);
 
@@ -1555,6 +1565,11 @@ BOOL freerdp_client_send_button_event(rdpClientContext* cctx, BOOL relative, UIN
 	BOOL handled = FALSE;
 
 	WINPR_ASSERT(cctx);
+
+	if (freerdp_settings_get_bool(cctx->context.settings, FreeRDP_HasRelativeMouseEvent))
+	{
+		return freerdp_input_send_rel_mouse_event(cctx->context.input, mflags, x, y);
+	}
 
 #if defined(CHANNEL_AINPUT_CLIENT)
 	if (cctx->ainput)
@@ -1607,6 +1622,11 @@ BOOL freerdp_client_send_extended_button_event(rdpClientContext* cctx, BOOL rela
 {
 	BOOL handled = FALSE;
 	WINPR_ASSERT(cctx);
+
+	if (freerdp_settings_get_bool(cctx->context.settings, FreeRDP_HasRelativeMouseEvent))
+	{
+		return freerdp_input_send_rel_mouse_event(cctx->context.input, mflags, x, y);
+	}
 
 #if defined(CHANNEL_AINPUT_CLIENT)
 	if (cctx->ainput)
@@ -1673,6 +1693,11 @@ static BOOL freerdp_handle_touch_up(rdpClientContext* cctx, const FreeRDP_TouchC
 			const UINT32 contactFlags = ((contact->flags & FREERDP_TOUCH_HAS_PRESSURE) != 0)
 			                                ? CONTACT_DATA_PRESSURE_PRESENT
 			                                : 0;
+			// Ensure contact position is unchanged from "engaged" to "out of range" state
+			rdpei->TouchRawEvent(rdpei, contact->id, contact->x, contact->y, &contactId,
+			                     RDPINPUT_CONTACT_FLAG_UPDATE | RDPINPUT_CONTACT_FLAG_INRANGE |
+			                         RDPINPUT_CONTACT_FLAG_INCONTACT,
+			                     contactFlags, contact->pressure);
 			rdpei->TouchRawEvent(rdpei, contact->id, contact->x, contact->y, &contactId, flags,
 			                     contactFlags, contact->pressure);
 		}
@@ -1716,7 +1741,8 @@ static BOOL freerdp_handle_touch_down(rdpClientContext* cctx, const FreeRDP_Touc
 
 		if (rdpei->TouchRawEvent)
 		{
-			const UINT32 flags = RDPINPUT_CONTACT_FLAG_DOWN;
+			const UINT32 flags = RDPINPUT_CONTACT_FLAG_DOWN | RDPINPUT_CONTACT_FLAG_INRANGE |
+			                     RDPINPUT_CONTACT_FLAG_INCONTACT;
 			const UINT32 contactFlags = ((contact->flags & FREERDP_TOUCH_HAS_PRESSURE) != 0)
 			                                ? CONTACT_DATA_PRESSURE_PRESENT
 			                                : 0;
@@ -1760,7 +1786,8 @@ static BOOL freerdp_handle_touch_motion(rdpClientContext* cctx, const FreeRDP_To
 
 		if (rdpei->TouchRawEvent)
 		{
-			const UINT32 flags = RDPINPUT_CONTACT_FLAG_UPDATE;
+			const UINT32 flags = RDPINPUT_CONTACT_FLAG_UPDATE | RDPINPUT_CONTACT_FLAG_INRANGE |
+			                     RDPINPUT_CONTACT_FLAG_INCONTACT;
 			const UINT32 contactFlags = ((contact->flags & FREERDP_TOUCH_HAS_PRESSURE) != 0)
 			                                ? CONTACT_DATA_PRESSURE_PRESENT
 			                                : 0;
@@ -1848,7 +1875,7 @@ BOOL freerdp_client_load_channels(freerdp* instance)
 
 	if (!freerdp_client_load_addins(instance->context->channels, instance->context->settings))
 	{
-		WLog_ERR(TAG, "Failed to load addins [%l08X]", GetLastError());
+		WLog_ERR(TAG, "Failed to load addins [%08" PRIx32 "]", GetLastError());
 		return FALSE;
 	}
 	return TRUE;
@@ -1977,6 +2004,26 @@ BOOL freerdp_client_handle_pen(rdpClientContext* cctx, UINT32 flags, INT32 devic
 	}
 	va_end(args);
 
+	if ((flags & FREERDP_PEN_PRESS) != 0)
+	{
+		// Ensure that only one button is pressed
+		if (pen->pressed)
+			flags = FREERDP_PEN_MOTION |
+			        (flags & (UINT32) ~(FREERDP_PEN_PRESS | FREERDP_PEN_BARREL_PRESSED));
+		else if ((flags & FREERDP_PEN_BARREL_PRESSED) != 0)
+			pen->flags |= FREERDP_PEN_BARREL_PRESSED;
+	}
+	else if ((flags & FREERDP_PEN_RELEASE) != 0)
+	{
+		if (!pen->pressed ||
+		    ((flags & FREERDP_PEN_BARREL_PRESSED) ^ (pen->flags & FREERDP_PEN_BARREL_PRESSED)))
+			flags = FREERDP_PEN_MOTION |
+			        (flags & (UINT32) ~(FREERDP_PEN_RELEASE | FREERDP_PEN_BARREL_PRESSED));
+		else
+			pen->flags &= (UINT32)~FREERDP_PEN_BARREL_PRESSED;
+	}
+
+	flags |= pen->flags;
 	if ((flags & FREERDP_PEN_ERASER_PRESSED) != 0)
 		penFlags |= RDPINPUT_PEN_FLAG_ERASER_PRESSED;
 	if ((flags & FREERDP_PEN_BARREL_PRESSED) != 0)
@@ -1986,7 +2033,7 @@ BOOL freerdp_client_handle_pen(rdpClientContext* cctx, UINT32 flags, INT32 devic
 	pen->last_y = y;
 	if ((flags & FREERDP_PEN_PRESS) != 0)
 	{
-		WLog_DBG(TAG, "Pen press %d", deviceid);
+		WLog_DBG(TAG, "Pen press %" PRId32, deviceid);
 		pen->hovering = FALSE;
 		pen->pressed = TRUE;
 
@@ -2061,9 +2108,9 @@ BOOL freerdp_client_pen_cancel_all(rdpClientContext* cctx)
 		FreeRDP_PenDevice* pen = &cctx->pens[i];
 		if (pen->hovering)
 		{
-			WLog_DBG(TAG, "unhover pen %d", i);
+			WLog_DBG(TAG, "unhover pen %" PRId32, pen->deviceid);
 			pen->hovering = FALSE;
-			rdpei->PenHoverCancel(rdpei, i, 0, pen->last_x, pen->last_y);
+			rdpei->PenHoverCancel(rdpei, pen->deviceid, 0, pen->last_x, pen->last_y);
 		}
 	}
 	return TRUE;
@@ -2084,4 +2131,15 @@ BOOL freerdp_client_is_pen(rdpClientContext* cctx, INT32 deviceid)
 	}
 
 	return FALSE;
+}
+
+BOOL freerdp_client_use_relative_mouse_events(rdpClientContext* ccontext)
+{
+	WINPR_ASSERT(ccontext);
+
+	const rdpSettings* settings = ccontext->context.settings;
+	const BOOL useRelative = freerdp_settings_get_bool(settings, FreeRDP_MouseUseRelativeMove);
+	const BOOL haveRelative = freerdp_settings_get_bool(settings, FreeRDP_HasRelativeMouseEvent);
+	const BOOL ainput = ccontext->ainput != NULL;
+	return useRelative && (haveRelative || ainput);
 }

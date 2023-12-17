@@ -25,6 +25,7 @@ static const size_t bool_list_indices[] = {
 	FreeRDP_BitmapCompressionDisabled,
 	FreeRDP_CertificateCallbackPreferPEM,
 	FreeRDP_CompressionEnabled,
+	FreeRDP_ConnectChildSession,
 	FreeRDP_ConsoleSession,
 	FreeRDP_CredentialsFromStdin,
 	FreeRDP_DeactivateClientDecoding,
@@ -84,6 +85,8 @@ static const size_t bool_list_indices[] = {
 	FreeRDP_HasExtendedMouseEvent,
 	FreeRDP_HasHorizontalWheel,
 	FreeRDP_HasMonitorAttributes,
+	FreeRDP_HasQoeEvent,
+	FreeRDP_HasRelativeMouseEvent,
 	FreeRDP_HiDefRemoteApp,
 	FreeRDP_IPv6Enabled,
 	FreeRDP_IgnoreCertificate,
@@ -136,6 +139,7 @@ static const size_t bool_list_indices[] = {
 	FreeRDP_RemoteAssistanceMode,
 	FreeRDP_RemoteAssistanceRequestControl,
 	FreeRDP_RemoteConsoleAudio,
+	FreeRDP_RemoteCredentialGuard,
 	FreeRDP_RemoteFxCodec,
 	FreeRDP_RemoteFxImageCodec,
 	FreeRDP_RemoteFxOnly,
@@ -245,6 +249,7 @@ static const size_t uint32_list_indices[] = {
 	FreeRDP_EncryptionLevel,
 	FreeRDP_EncryptionMethods,
 	FreeRDP_ExtEncryptionMethods,
+	FreeRDP_FakeMouseMotionInterval,
 	FreeRDP_Floatbar,
 	FreeRDP_FrameAcknowledge,
 	FreeRDP_GatewayAcceptedCertLength,
@@ -327,8 +332,8 @@ static const size_t uint32_list_indices[] = {
 	FreeRDP_TcpKeepAliveRetries,
 	FreeRDP_ThreadingFlags,
 	FreeRDP_TlsSecLevel,
-	FreeRDP_VirtualChannelChunkSize,
-	FreeRDP_VirtualChannelCompressionFlags,
+	FreeRDP_VCChunkSize,
+	FreeRDP_VCFlags,
 };
 
 #define have_int32_list_indices
@@ -344,6 +349,7 @@ static const size_t uint64_list_indices[] = {
 
 #define have_string_list_indices
 static const size_t string_list_indices[] = {
+	FreeRDP_AadServerHostname,
 	FreeRDP_AcceptedCert,
 	FreeRDP_ActionScript,
 	FreeRDP_AllowedTlsCiphers,
@@ -359,6 +365,7 @@ static const size_t string_list_indices[] = {
 	FreeRDP_ClientDir,
 	FreeRDP_ClientHostname,
 	FreeRDP_ClientProductId,
+	FreeRDP_ClipboardUseSelection,
 	FreeRDP_ComputerName,
 	FreeRDP_ConfigPath,
 	FreeRDP_ConnectionFile,
@@ -371,6 +378,13 @@ static const size_t string_list_indices[] = {
 	FreeRDP_DynamicDSTTimeZoneKeyName,
 	FreeRDP_GatewayAcceptedCert,
 	FreeRDP_GatewayAccessToken,
+	FreeRDP_GatewayAvdAadtenantid,
+	FreeRDP_GatewayAvdActivityhint,
+	FreeRDP_GatewayAvdArmpath,
+	FreeRDP_GatewayAvdDiagnosticserviceurl,
+	FreeRDP_GatewayAvdGeo,
+	FreeRDP_GatewayAvdHubdiscoverygeourl,
+	FreeRDP_GatewayAvdWvdEndpointPool,
 	FreeRDP_GatewayDomain,
 	FreeRDP_GatewayHostname,
 	FreeRDP_GatewayHttpExtAuthBearer,

@@ -102,6 +102,7 @@ static const char* rdpdr_state_str(enum RDPDR_CHANNEL_STATE state)
 			return "RDPDR_CHANNEL_STATE_UNKNOWN";
 	}
 }
+
 static const char* rdpdr_device_type_string(UINT32 type)
 {
 	switch (type)
@@ -119,6 +120,44 @@ static const char* rdpdr_device_type_string(UINT32 type)
 		default:
 			return "UNKNOWN";
 	}
+}
+
+static const char* support_str(BOOL val)
+{
+	if (val)
+		return "supported";
+	return "not found";
+}
+
+static const char* rdpdr_caps_pdu_str(UINT32 flag)
+{
+	switch (flag)
+	{
+		case RDPDR_DEVICE_REMOVE_PDUS:
+			return "RDPDR_USER_LOGGEDON_PDU";
+		case RDPDR_CLIENT_DISPLAY_NAME_PDU:
+			return "RDPDR_CLIENT_DISPLAY_NAME_PDU";
+		case RDPDR_USER_LOGGEDON_PDU:
+			return "RDPDR_USER_LOGGEDON_PDU";
+		default:
+			return "RDPDR_UNKNONW";
+	}
+}
+
+static BOOL rdpdr_check_extended_pdu_flag(rdpdrPlugin* rdpdr, UINT32 flag)
+{
+	WINPR_ASSERT(rdpdr);
+
+	const BOOL client = (rdpdr->clientExtendedPDU & flag) != 0;
+	const BOOL server = (rdpdr->serverExtendedPDU & flag) != 0;
+
+	if (!client || !server)
+	{
+		WLog_Print(rdpdr->log, WLOG_WARN, "Checking ExtendedPDU::%s, client %s, server %s",
+		           rdpdr_caps_pdu_str(flag), support_str(client), support_str(server));
+		return FALSE;
+	}
+	return TRUE;
 }
 
 BOOL rdpdr_state_advance(rdpdrPlugin* rdpdr, enum RDPDR_CHANNEL_STATE next)
@@ -199,6 +238,9 @@ static UINT rdpdr_send_device_list_remove_request(rdpdrPlugin* rdpdr, UINT32 cou
 	WINPR_ASSERT(ids || (count == 0));
 
 	if (count == 0)
+		return CHANNEL_RC_OK;
+
+	if (!rdpdr_check_extended_pdu_flag(rdpdr, RDPDR_DEVICE_REMOVE_PDUS))
 		return CHANNEL_RC_OK;
 
 	s = StreamPool_Take(rdpdr->pool, count * sizeof(UINT32) + 8);
@@ -899,7 +941,7 @@ static BOOL hotplug_delete_foreach(ULONG_PTR key, void* element, void* data)
 		for (i = 0; i < arg->dev_array_size; i++)
 		{
 			hotplug_dev* cur = &arg->dev_array[i];
-			if (strstr(path, cur->path) != NULL)
+			if (cur->path && strstr(path, cur->path) != NULL)
 			{
 				dev_found = TRUE;
 				cur->to_add = FALSE;
@@ -1085,8 +1127,6 @@ static UINT drive_hotplug_thread_terminate(rdpdrPlugin* rdpdr)
  */
 static UINT rdpdr_process_connect(rdpdrPlugin* rdpdr)
 {
-	UINT32 index;
-	rdpSettings* settings;
 	UINT error = CHANNEL_RC_OK;
 
 	WINPR_ASSERT(rdpdr);
@@ -1100,19 +1140,22 @@ static UINT rdpdr_process_connect(rdpdrPlugin* rdpdr)
 	}
 
 	WINPR_ASSERT(rdpdr->rdpcontext);
-	settings = rdpdr->rdpcontext->settings;
+
+	rdpSettings* settings = rdpdr->rdpcontext->settings;
 	WINPR_ASSERT(settings);
 
-	rdpdr->ignoreInvalidDevices = settings->IgnoreInvalidDevices;
+	rdpdr->ignoreInvalidDevices = freerdp_settings_get_bool(settings, FreeRDP_IgnoreInvalidDevices);
 
-	if (settings->ClientHostname)
-		strncpy(rdpdr->computerName, settings->ClientHostname, sizeof(rdpdr->computerName) - 1);
-	else
-		strncpy(rdpdr->computerName, settings->ComputerName, sizeof(rdpdr->computerName) - 1);
+	const char* name = freerdp_settings_get_string(settings, FreeRDP_ClientHostname);
+	if (!name)
+		name = freerdp_settings_get_string(settings, FreeRDP_ComputerName);
+	strncpy(rdpdr->computerName, name, sizeof(rdpdr->computerName) - 1);
 
-	for (index = 0; index < settings->DeviceCount; index++)
+	for (UINT32 index = 0; index < freerdp_settings_get_uint32(settings, FreeRDP_DeviceCount);
+	     index++)
 	{
-		const RDPDR_DEVICE* device = settings->DeviceArray[index];
+		const RDPDR_DEVICE* device =
+		    freerdp_settings_get_pointer_array(settings, FreeRDP_DeviceArray, index);
 
 		if (device->Type == RDPDR_DTYP_FILESYSTEM)
 		{
@@ -1374,13 +1417,7 @@ static UINT rdpdr_send_device_list_announce_request(rdpdrPlugin* rdpdr, BOOL use
 
 	if (userLoggedOn)
 	{
-		WINPR_ASSERT(rdpdr->state >= RDPDR_CHANNEL_STATE_READY);
-		rdpdr_state_advance(rdpdr, RDPDR_CHANNEL_STATE_USER_LOGGEDON);
-	}
-	else
-	{
-		WINPR_ASSERT(rdpdr->state >= RDPDR_CHANNEL_STATE_CLIENTID_CONFIRM);
-		rdpdr_state_advance(rdpdr, RDPDR_CHANNEL_STATE_READY);
+		rdpdr->userLoggedOn = TRUE;
 	}
 
 	s = StreamPool_Take(rdpdr->pool, 256);
@@ -1522,7 +1559,7 @@ static UINT rdpdr_process_component(rdpdrPlugin* rdpdr, UINT16 component, UINT16
 	device = devman_get_device_by_type(rdpdr->devman, type);
 
 	if (!device)
-		return ERROR_INVALID_PARAMETER;
+		return ERROR_DEV_NOT_EXIST;
 
 	return IFCALLRESULT(ERROR_INVALID_PARAMETER, device->CustomComponentRequest, device, component,
 	                    packetId, s);
@@ -1557,22 +1594,56 @@ static UINT rdpdr_process_init(rdpdrPlugin* rdpdr)
 	WINPR_ASSERT(rdpdr);
 	WINPR_ASSERT(rdpdr->devman);
 
+	rdpdr->userLoggedOn = FALSE; /* reset possible received state */
 	if (!device_foreach(rdpdr, TRUE, device_init, rdpdr->log))
 		return ERROR_INTERNAL_ERROR;
 	return CHANNEL_RC_OK;
 }
 
-static BOOL rdpdr_state_check(rdpdrPlugin* rdpdr, UINT16 packetid,
-                              enum RDPDR_CHANNEL_STATE expected, enum RDPDR_CHANNEL_STATE next)
+static BOOL state_match(enum RDPDR_CHANNEL_STATE state, size_t count, va_list ap)
 {
+	for (size_t x = 0; x < count; x++)
+	{
+		enum RDPDR_CHANNEL_STATE cur = va_arg(ap, enum RDPDR_CHANNEL_STATE);
+		if (state == cur)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+static const char* state_str(size_t count, va_list ap, char* buffer, size_t size)
+{
+	for (size_t x = 0; x < count; x++)
+	{
+		enum RDPDR_CHANNEL_STATE cur = va_arg(ap, enum RDPDR_CHANNEL_STATE);
+		const char* curstr = rdpdr_state_str(cur);
+		winpr_str_append(curstr, buffer, size, "|");
+	}
+	return buffer;
+}
+
+static BOOL rdpdr_state_check(rdpdrPlugin* rdpdr, UINT16 packetid, enum RDPDR_CHANNEL_STATE next,
+                              size_t count, ...)
+{
+	va_list ap;
 	WINPR_ASSERT(rdpdr);
 
-	const char* strstate = rdpdr_state_str(rdpdr->state);
-	if (rdpdr->state != expected)
+	va_start(ap, count);
+	BOOL rc = state_match(rdpdr->state, count, ap);
+	va_end(ap);
+
+	if (!rc)
 	{
+		const char* strstate = rdpdr_state_str(rdpdr->state);
+		char buffer[256] = { 0 };
+
+		va_start(ap, count);
+		state_str(count, ap, buffer, sizeof(buffer));
+		va_end(ap);
+
 		WLog_Print(rdpdr->log, WLOG_ERROR,
-		           "channel [RDPDR] received %s, expected state %s but have state %s, aborting.",
-		           rdpdr_packetid_string(packetid), rdpdr_state_str(expected), strstate);
+		           "channel [RDPDR] received %s, expected states [%s] but have state %s, aborting.",
+		           rdpdr_packetid_string(packetid), buffer, strstate);
 
 		rdpdr_state_advance(rdpdr, RDPDR_CHANNEL_STATE_INITIAL);
 		return FALSE;
@@ -1592,23 +1663,30 @@ static BOOL rdpdr_check_channel_state(rdpdrPlugin* rdpdr, UINT16 packetid)
 			 * then reinitialize the channel after login successful
 			 */
 			rdpdr_state_advance(rdpdr, RDPDR_CHANNEL_STATE_INITIAL);
-			return rdpdr_state_check(rdpdr, packetid, RDPDR_CHANNEL_STATE_INITIAL,
-			                         RDPDR_CHANNEL_STATE_ANNOUNCE);
+			return rdpdr_state_check(rdpdr, packetid, RDPDR_CHANNEL_STATE_ANNOUNCE, 1,
+			                         RDPDR_CHANNEL_STATE_INITIAL);
 		case PAKID_CORE_SERVER_CAPABILITY:
-			return rdpdr_state_check(rdpdr, packetid, RDPDR_CHANNEL_STATE_NAME_REQUEST,
-			                         RDPDR_CHANNEL_STATE_SERVER_CAPS);
+			return rdpdr_state_check(rdpdr, packetid, RDPDR_CHANNEL_STATE_SERVER_CAPS, 6,
+			                         RDPDR_CHANNEL_STATE_NAME_REQUEST,
+			                         RDPDR_CHANNEL_STATE_SERVER_CAPS, RDPDR_CHANNEL_STATE_READY,
+			                         RDPDR_CHANNEL_STATE_CLIENT_CAPS, PAKID_CORE_CLIENTID_CONFIRM,
+			                         PAKID_CORE_USER_LOGGEDON);
 		case PAKID_CORE_CLIENTID_CONFIRM:
-			return rdpdr_state_check(rdpdr, packetid, RDPDR_CHANNEL_STATE_CLIENT_CAPS,
-			                         RDPDR_CHANNEL_STATE_CLIENTID_CONFIRM);
-		case PAKID_CORE_USER_LOGGEDON:
-			return rdpdr_state_check(rdpdr, packetid, RDPDR_CHANNEL_STATE_READY,
+			return rdpdr_state_check(rdpdr, packetid, RDPDR_CHANNEL_STATE_CLIENTID_CONFIRM, 3,
+			                         RDPDR_CHANNEL_STATE_CLIENT_CAPS, RDPDR_CHANNEL_STATE_READY,
 			                         RDPDR_CHANNEL_STATE_USER_LOGGEDON);
+		case PAKID_CORE_USER_LOGGEDON:
+			if (!rdpdr_check_extended_pdu_flag(rdpdr, RDPDR_USER_LOGGEDON_PDU))
+				return FALSE;
+
+			return rdpdr_state_check(
+			    rdpdr, packetid, RDPDR_CHANNEL_STATE_USER_LOGGEDON, 4,
+			    RDPDR_CHANNEL_STATE_NAME_REQUEST, RDPDR_CHANNEL_STATE_CLIENT_CAPS,
+			    RDPDR_CHANNEL_STATE_CLIENTID_CONFIRM, RDPDR_CHANNEL_STATE_READY);
 		default:
 		{
 			enum RDPDR_CHANNEL_STATE state = RDPDR_CHANNEL_STATE_READY;
-			if (rdpdr->state == RDPDR_CHANNEL_STATE_USER_LOGGEDON)
-				state = RDPDR_CHANNEL_STATE_USER_LOGGEDON;
-			return rdpdr_state_check(rdpdr, packetid, state, state);
+			return rdpdr_state_check(rdpdr, packetid, state, 1, state);
 		}
 	}
 }
@@ -1690,7 +1768,10 @@ static UINT rdpdr_process_receive(rdpdrPlugin* rdpdr, wStream* s)
 						    "rdpdr_send_device_list_announce_request failed with error %" PRIu32 "",
 						    error);
 					}
-
+					else if (!rdpdr_state_advance(rdpdr, RDPDR_CHANNEL_STATE_READY))
+					{
+						error = ERROR_INTERNAL_ERROR;
+					}
 					break;
 
 				case PAKID_CORE_USER_LOGGEDON:
@@ -1700,6 +1781,10 @@ static UINT rdpdr_process_receive(rdpdrPlugin* rdpdr, wStream* s)
 						    rdpdr->log, WLOG_ERROR,
 						    "rdpdr_send_device_list_announce_request failed with error %" PRIu32 "",
 						    error);
+					}
+					else if (!rdpdr_state_advance(rdpdr, RDPDR_CHANNEL_STATE_READY))
+					{
+						error = ERROR_INTERNAL_ERROR;
 					}
 
 					break;
@@ -1744,7 +1829,16 @@ static UINT rdpdr_process_receive(rdpdrPlugin* rdpdr, wStream* s)
 
 			if (error != CHANNEL_RC_OK)
 			{
-				WLog_Print(rdpdr->log, WLOG_ERROR,
+				DWORD level = WLOG_ERROR;
+				if (rdpdr->ignoreInvalidDevices)
+				{
+					if (error == ERROR_DEV_NOT_EXIST)
+					{
+						level = WLOG_WARN;
+						error = CHANNEL_RC_OK;
+					}
+				}
+				WLog_Print(rdpdr->log, level,
 				           "Unknown message: Component: %s [0x%04" PRIX16
 				           "] PacketId: %s [0x%04" PRIX16 "]",
 				           rdpdr_component_string(component), component,
@@ -2173,6 +2267,18 @@ FREERDP_ENTRY_POINT(BOOL VCAPITYPE VirtualChannelEntryEx(PCHANNEL_ENTRY_POINTS p
 		return FALSE;
 	}
 	rdpdr->log = WLog_Get(TAG);
+
+	rdpdr->clientExtendedPDU =
+	    RDPDR_DEVICE_REMOVE_PDUS | RDPDR_CLIENT_DISPLAY_NAME_PDU | RDPDR_USER_LOGGEDON_PDU;
+	rdpdr->clientIOCode1 =
+	    RDPDR_IRP_MJ_CREATE | RDPDR_IRP_MJ_CLEANUP | RDPDR_IRP_MJ_CLOSE | RDPDR_IRP_MJ_READ |
+	    RDPDR_IRP_MJ_WRITE | RDPDR_IRP_MJ_FLUSH_BUFFERS | RDPDR_IRP_MJ_SHUTDOWN |
+	    RDPDR_IRP_MJ_DEVICE_CONTROL | RDPDR_IRP_MJ_QUERY_VOLUME_INFORMATION |
+	    RDPDR_IRP_MJ_SET_VOLUME_INFORMATION | RDPDR_IRP_MJ_QUERY_INFORMATION |
+	    RDPDR_IRP_MJ_SET_INFORMATION | RDPDR_IRP_MJ_DIRECTORY_CONTROL | RDPDR_IRP_MJ_LOCK_CONTROL |
+	    RDPDR_IRP_MJ_QUERY_SECURITY | RDPDR_IRP_MJ_SET_SECURITY;
+
+	rdpdr->clientExtraFlags1 = ENABLE_ASYNCIO;
 
 	rdpdr->pool = StreamPool_New(TRUE, 1024);
 	if (!rdpdr->pool)

@@ -47,10 +47,13 @@ BuildRequires: libxml2-devel
 BuildRequires: zlib-devel
 BuildRequires: krb5-devel
 BuildRequires: cjson-devel
+BuildRequires: uriparser-devel
+BuildRequires: opus-devel
 
 # (Open)Suse
 %if %{defined suse_version}
 BuildRequires: libSDL2-devel
+BuildRequires: libSDL2_ttf-devel
 BuildRequires: docbook-xsl-stylesheets
 BuildRequires: libxslt-tools
 BuildRequires: pkg-config
@@ -65,10 +68,13 @@ BuildRequires: libjpeg-devel
 BuildRequires: libavutil-devel
 BuildRequires: libavcodec-devel
 BuildRequires: libswresample-devel
+BuildRequires: libpkcs11-helper1-devel
+BuildRequires: libfuse3-dev
 %endif
 # fedora 21+
 %if 0%{?fedora} >= 21 || 0%{?rhel} >= 7
 BuildRequires: SDL2-devel
+BuildRequires: SDL2_ttf-devel
 BuildRequires: docbook-style-xsl
 BuildRequires: libxslt
 BuildRequires: pkgconfig
@@ -79,7 +85,11 @@ BuildRequires: libusbx-devel
 BuildRequires: systemd-devel
 BuildRequires: dbus-glib-devel
 BuildRequires: libjpeg-turbo-devel
-%endif 
+BuildRequires: pkcs11-helper-devel
+BuildRequires: fuse3-devel
+BuildRequires: libasan
+BuildRequires: webkit2gtk4.0-devel
+%endif
 
 %if 0%{?fedora} >= 33
 BuildRequires: wayland-devel
@@ -123,6 +133,7 @@ cp %{_topdir}/SOURCES/source_version freerdp-nightly-%{version}/.source_version
         -DWITH_CUPS=ON \
         -DWITH_PCSC=ON \
         -DWITH_JPEG=ON \
+        -DWITH_OPUS=ON \
 %if 0%{?fedora} >= 36 || 0%{?rhel} >= 9 || 0%{?suse_version}
         -DWITH_FFMPEG=ON \
         -DWITH_DSP_FFMPEG=ON \
@@ -163,7 +174,7 @@ make %{?_smp_mflags}
 rm -rf $RPM_BUILD_ROOT
 make install DESTDIR=$RPM_BUILD_ROOT
 %endif
-%endif 
+%endif
 
 find %{buildroot} -name "*.a" -delete
 export NO_BRP_CHECK_RPATH true
@@ -177,7 +188,9 @@ export NO_BRP_CHECK_RPATH true
 %dir %{INSTALL_PREFIX}/share/man/
 %dir %{INSTALL_PREFIX}/share/man/man1
 %dir %{INSTALL_PREFIX}/share/man/man7
+%dir %{INSTALL_PREFIX}/%{_lib}/freerdp3/proxy/
 %{INSTALL_PREFIX}/%{_lib}/*.so.*
+%{INSTALL_PREFIX}/%{_lib}/freerdp3/proxy/*.so
 %{INSTALL_PREFIX}/bin/
 %{INSTALL_PREFIX}/share/man/man1/xfreerdp.1*
 %{INSTALL_PREFIX}/share/man/man1/freerdp-shadow-cli.1*
@@ -199,6 +212,8 @@ export NO_BRP_CHECK_RPATH true
 
 
 %changelog
+* Wed Nov 15 2023 FreeRDP Team <team@freerdp.com> - 3.0.0-0
+- Update build dependencies
 * Wed Feb 7 2018 FreeRDP Team <team@freerdp.com> - 2.0.0-0
 - Update version information and support for OpenSuse 42.1
 * Tue Feb 03 2015 FreeRDP Team <team@freerdp.com> - 1.2.1-0

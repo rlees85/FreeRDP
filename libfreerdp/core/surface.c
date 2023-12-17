@@ -19,6 +19,8 @@
 
 #include <freerdp/config.h>
 
+#include "settings.h"
+
 #include <winpr/assert.h>
 
 #include <freerdp/utils/pcap.h>

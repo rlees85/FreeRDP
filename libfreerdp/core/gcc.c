@@ -23,6 +23,8 @@
 
 #include <freerdp/config.h>
 
+#include "settings.h"
+
 #include <winpr/crt.h>
 #include <winpr/crypto.h>
 #include <winpr/assert.h>
@@ -168,7 +170,8 @@ static const char* rdp_early_client_caps_string(UINT32 flags, char* buffer, size
 	char msg[32] = { 0 };
 	const UINT32 mask = RNS_UD_CS_SUPPORT_ERRINFO_PDU | RNS_UD_CS_WANT_32BPP_SESSION |
 	                    RNS_UD_CS_SUPPORT_STATUSINFO_PDU | RNS_UD_CS_STRONG_ASYMMETRIC_KEYS |
-	                    RNS_UD_CS_VALID_CONNECTION_TYPE | RNS_UD_CS_SUPPORT_MONITOR_LAYOUT_PDU |
+	                    RNS_UD_CS_RELATIVE_MOUSE_INPUT | RNS_UD_CS_VALID_CONNECTION_TYPE |
+	                    RNS_UD_CS_SUPPORT_MONITOR_LAYOUT_PDU |
 	                    RNS_UD_CS_SUPPORT_NETCHAR_AUTODETECT |
 	                    RNS_UD_CS_SUPPORT_DYNVC_GFX_PROTOCOL | RNS_UD_CS_SUPPORT_DYNAMIC_TIME_ZONE |
 	                    RNS_UD_CS_SUPPORT_HEARTBEAT_PDU | RNS_UD_CS_SUPPORT_SKIP_CHANNELJOIN;
@@ -182,6 +185,8 @@ static const char* rdp_early_client_caps_string(UINT32 flags, char* buffer, size
 		winpr_str_append("RNS_UD_CS_SUPPORT_STATUSINFO_PDU", buffer, size, "|");
 	if (flags & RNS_UD_CS_STRONG_ASYMMETRIC_KEYS)
 		winpr_str_append("RNS_UD_CS_STRONG_ASYMMETRIC_KEYS", buffer, size, "|");
+	if (flags & RNS_UD_CS_RELATIVE_MOUSE_INPUT)
+		winpr_str_append("RNS_UD_CS_RELATIVE_MOUSE_INPUT", buffer, size, "|");
 	if (flags & RNS_UD_CS_VALID_CONNECTION_TYPE)
 		winpr_str_append("RNS_UD_CS_VALID_CONNECTION_TYPE", buffer, size, "|");
 	if (flags & RNS_UD_CS_SUPPORT_MONITOR_LAYOUT_PDU)
@@ -227,6 +232,7 @@ static DWORD rdp_version_common(DWORD serverVersion, DWORD clientVersion)
 		case RDP_VERSION_10_9:
 		case RDP_VERSION_10_10:
 		case RDP_VERSION_10_11:
+		case RDP_VERSION_10_12:
 			return version;
 
 		default:
@@ -557,6 +563,11 @@ BOOL gcc_write_conference_create_response(wStream* s, wStream* userData)
 	                              0); /* array of server data blocks */
 }
 
+static BOOL gcc_read_client_unused1_data(wStream* s)
+{
+	return Stream_SafeSeek(s, 2);
+}
+
 BOOL gcc_read_client_data_blocks(wStream* s, rdpMcs* mcs, UINT16 length)
 {
 	WINPR_ASSERT(s);
@@ -618,6 +629,12 @@ BOOL gcc_read_client_data_blocks(wStream* s, rdpMcs* mcs, UINT16 length)
 
 			case CS_MONITOR_EX:
 				if (!gcc_read_client_monitor_extended_data(sub, mcs))
+					return FALSE;
+
+				break;
+
+			case CS_UNUSED1:
+				if (!gcc_read_client_unused1_data(sub))
 					return FALSE;
 
 				break;
@@ -734,6 +751,9 @@ char* gcc_block_type_string(UINT16 type, char* buffer, size_t size)
 			break;
 		case CS_MONITOR_EX:
 			_snprintf(buffer, size, "CS_MONITOR_EX [0x%04" PRIx16 "]", type);
+			break;
+		case CS_UNUSED1:
+			_snprintf(buffer, size, "CS_UNUSED1 [0x%04" PRIx16 "]", type);
 			break;
 		case CS_MULTITRANSPORT:
 			_snprintf(buffer, size, "CS_MONITOR_EX [0x%04" PRIx16 "]", type);
@@ -954,10 +974,10 @@ static UINT16 filterAndLogEarlyClientCapabilityFlags(UINT32 flags)
 	const UINT32 mask =
 	    (RNS_UD_CS_SUPPORT_ERRINFO_PDU | RNS_UD_CS_WANT_32BPP_SESSION |
 	     RNS_UD_CS_SUPPORT_STATUSINFO_PDU | RNS_UD_CS_STRONG_ASYMMETRIC_KEYS |
-	     RNS_UD_CS_VALID_CONNECTION_TYPE | RNS_UD_CS_SUPPORT_MONITOR_LAYOUT_PDU |
-	     RNS_UD_CS_SUPPORT_NETCHAR_AUTODETECT | RNS_UD_CS_SUPPORT_DYNVC_GFX_PROTOCOL |
-	     RNS_UD_CS_SUPPORT_DYNAMIC_TIME_ZONE | RNS_UD_CS_SUPPORT_HEARTBEAT_PDU |
-	     RNS_UD_CS_SUPPORT_SKIP_CHANNELJOIN);
+	     RNS_UD_CS_RELATIVE_MOUSE_INPUT | RNS_UD_CS_VALID_CONNECTION_TYPE |
+	     RNS_UD_CS_SUPPORT_MONITOR_LAYOUT_PDU | RNS_UD_CS_SUPPORT_NETCHAR_AUTODETECT |
+	     RNS_UD_CS_SUPPORT_DYNVC_GFX_PROTOCOL | RNS_UD_CS_SUPPORT_DYNAMIC_TIME_ZONE |
+	     RNS_UD_CS_SUPPORT_HEARTBEAT_PDU | RNS_UD_CS_SUPPORT_SKIP_CHANNELJOIN);
 	const UINT32 filtered = flags & mask;
 	const UINT32 unknown = flags & ~mask;
 	if (unknown != 0)
@@ -1007,6 +1027,9 @@ static UINT16 earlyClientCapsFromSettings(const rdpSettings* settings)
 	if (settings->SupportAsymetricKeys)
 		earlyCapabilityFlags |= RNS_UD_CS_STRONG_ASYMMETRIC_KEYS;
 
+	if (settings->HasRelativeMouseEvent)
+		earlyCapabilityFlags |= RNS_UD_CS_RELATIVE_MOUSE_INPUT;
+
 	if (settings->SupportSkipChannelJoin)
 		earlyCapabilityFlags |= RNS_UD_CS_SUPPORT_SKIP_CHANNELJOIN;
 
@@ -1035,6 +1058,10 @@ static BOOL updateEarlyClientCaps(rdpSettings* settings, UINT32 earlyCapabilityF
 	if (settings->SupportAsymetricKeys)
 		settings->SupportAsymetricKeys =
 		    (earlyCapabilityFlags & RNS_UD_CS_STRONG_ASYMMETRIC_KEYS) ? TRUE : FALSE;
+
+	if (settings->HasRelativeMouseEvent)
+		settings->HasRelativeMouseEvent =
+		    (earlyCapabilityFlags & RNS_UD_CS_RELATIVE_MOUSE_INPUT) ? TRUE : FALSE;
 
 	if (settings->NetworkAutoDetect)
 		settings->NetworkAutoDetect =
@@ -1102,7 +1129,6 @@ static BOOL updateEarlyServerCaps(rdpSettings* settings, UINT32 earlyCapabilityF
  * msdn{cc240510}
  * @param s stream
  * @param mcs The MCS instance
- * @param blockLength the length of the block
  *
  * @return \b TRUE for success, \b FALSE otherwise
  */
@@ -1498,7 +1524,6 @@ BOOL gcc_write_server_core_data(wStream* s, rdpMcs* mcs)
  * msdn{cc240511}
  * @param s stream
  * @param mcs MCS instance
- * @param blockLength the length of the block
  *
  * @return \b TRUE for success, \b FALSE otherwise
  */
@@ -1914,7 +1939,6 @@ BOOL gcc_write_server_security_data(wStream* s, rdpMcs* mcs)
  *
  * @param s stream
  * @param mcs The MCS instance
- * @param blockLength the length of the block
  *
  * @return \b TRUE for success, \b FALSE otherwise
  */
@@ -2070,7 +2094,6 @@ BOOL gcc_write_server_network_data(wStream* s, const rdpMcs* mcs)
  * msdn{cc240514}
  * @param s stream
  * @param mcs The MCS instance
- * @param blockLength the length of the block
  *
  * @return \b TRUE for success, \b FALSE otherwise
  */
@@ -2165,7 +2188,6 @@ BOOL gcc_write_client_cluster_data(wStream* s, const rdpMcs* mcs)
  * msdn{dd305336}
  * @param s stream
  * @param mcs The MCS instance
- * @param blockLength the lenght of the block
  *
  * @return \b TRUE for success, \b FALSE otherwise
  */
@@ -2447,7 +2469,6 @@ BOOL gcc_write_server_message_channel_data(wStream* s, const rdpMcs* mcs)
  * msdn{jj217498}
  * @param s stream
  * @param mcs The MCS instance
- * @param blockLength the length of the block
  *
  * @return \b TRUE for success, \b FALSE otherwise
  */

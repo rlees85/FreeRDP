@@ -112,6 +112,10 @@ static const COMMAND_LINE_ARGUMENT_A global_cmd_args[] = {
 	{ "cert-tofu", COMMAND_LINE_VALUE_FLAG, NULL, NULL, NULL, -1, NULL,
 	  "[DEPRECATED, use /cert:tofu] Automatically accept certificate on first connect" },
 #endif
+#ifdef _WIN32
+	{ "connect-child-session", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueFalse, NULL, -1, "",
+	  "connect to child session (win32)" },
+#endif
 	{ "client-build-number", COMMAND_LINE_VALUE_REQUIRED, "<number>", NULL, NULL, -1, NULL,
 	  "Client Build Number sent to server (influences smartcard behaviour, see [MS-RDPESC])" },
 	{ "client-hostname", COMMAND_LINE_VALUE_REQUIRED, "<name>", NULL, NULL, -1, NULL,
@@ -315,7 +319,7 @@ static const COMMAND_LINE_ARGUMENT_A global_cmd_args[] = {
 	  "Select monitors to use" },
 	{ "mouse-motion", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueTrue, NULL, -1, NULL,
 	  "Send mouse motion" },
-	{ "mouse-relative", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueTrue, NULL, -1, NULL,
+	{ "mouse-relative", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueFalse, NULL, -1, NULL,
 	  "Send mouse motion with relative addressing" },
 	{ "mouse", COMMAND_LINE_VALUE_REQUIRED, "[relative:[on|off],grab:[on|off]]", NULL, NULL, -1,
 	  NULL,
@@ -494,6 +498,9 @@ static const COMMAND_LINE_ARGUMENT_A global_cmd_args[] = {
 	  "Print version" },
 	{ "video", COMMAND_LINE_VALUE_FLAG, NULL, NULL, NULL, -1, NULL,
 	  "Video optimized remoting channel" },
+	{ "prevent-session-lock", COMMAND_LINE_VALUE_OPTIONAL, "<time in sec>", NULL, NULL, -1, NULL,
+	  "Prevent session locking by injecting fake mouse motion events to the server "
+	  "when the connection is idle (default interval: 180 seconds)" },
 	{ "vmconnect", COMMAND_LINE_VALUE_OPTIONAL, "<vmid>", NULL, NULL, -1, NULL,
 	  "Hyper-V console (use port 2179, disable negotiation)" },
 	{ "w", COMMAND_LINE_VALUE_REQUIRED, "<width>", "1024", NULL, -1, NULL, "Width" },
